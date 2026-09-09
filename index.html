@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609089" /> />
+<meta name="build-version" content="202609090" /> /> />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -6036,10 +6036,12 @@ function loadDiceCfg(){
   try { const o = JSON.parse(localStorage.getItem(DICE_CFG_KEY));
     if(o && typeof o==='object') return {
       lowMin: Number(o.lowMin)||0.2, lowMax: Number(o.lowMax)||0.7,
-      highMin: Number(o.highMin)||1, highMax: Number(o.highMax)||20
+      highMin: Number(o.highMin)||1, highMax: Number(o.highMax)||20,
+      bigMin: Math.max(1, Number(o.bigMin)||10),            // ≥该值算「大数」
+      bigFromRound: Math.max(1, Number(o.bigFromRound)||10) // 第几局起才允许出现大数
     };
   } catch(e){}
-  return { lowMin:0.2, lowMax:0.7, highMin:1, highMax:20 };
+  return { lowMin:0.2, lowMax:0.7, highMin:1, highMax:20, bigMin:10, bigFromRound:10 };
 }
 function saveDiceCfg(){ localStorage.setItem(DICE_CFG_KEY, JSON.stringify(diceCfg)); }
 function loadDice(){
@@ -6173,9 +6175,22 @@ function genDiceRound(R){
   else if(R<=30) { low=1; high=5; }
   else { low=0; high=6; }
   const arr = [];
+  const [hMin, hMax] = diceHighRange(R);
   for(let i=0;i<low;i++){ arr.push(round1(diceCfg.lowMin + Math.random()*(diceCfg.lowMax - diceCfg.lowMin))); }
-  for(let i=0;i<high;i++){ arr.push(Math.floor(diceCfg.highMin + Math.random()*(diceCfg.highMax - diceCfg.highMin + 1))); }
+  for(let i=0;i<high;i++){ arr.push(Math.floor(hMin + Math.random()*(hMax - hMin + 1))); }
   return arr; // 长度恒为 6
+}
+/* 按局数给出本局高位整数的实际取值区间 [min,max]。
+   第 <bigFromRound 局时不允许出现 >=bigMin 的大数（上限压到 bigMin-1），逐步放开到 highMax。
+   若下限本身已 >= bigMin（家长配置冲突），则退化为不限制，避免出现空区间。 */
+function diceHighRange(R){
+  const baseMax = Number(diceCfg.highMax)||20, baseMin = Number(diceCfg.highMin)||1;
+  const from = Math.max(1, Number(diceCfg.bigFromRound)||10);
+  const gate = Math.max(1, Number(diceCfg.bigMin)||10);
+  if(R >= from) return [baseMin, baseMax];
+  const cap = Math.min(baseMax, gate - 1);
+  if(cap < baseMin) return [baseMin, baseMax];
+  return [baseMin, cap];
 }
 function renderDice(){
   const stars = starCount();
@@ -11098,8 +11113,18 @@ function renderParent(){
             <span class="rm-sub">最大</span><input class="rm-input sm" id="diceHighMax" type="number" step="0.1" value="${diceCfg.highMax}">
           </div>
           <div class="rm-item">
+            <span class="rm-label">大数门槛</span>
+            <span class="rm-sub">≥</span><input class="rm-input sm" id="diceBigMin" type="number" step="1" min="1" value="${diceCfg.bigMin}">
+            <span class="rm-sub">算大数</span>
+          </div>
+          <div class="rm-item">
+            <span class="rm-label">大数局次</span>
+            <span class="rm-sub">第</span><input class="rm-input sm" id="diceBigFrom" type="number" step="1" min="1" value="${diceCfg.bigFromRound}">
+            <span class="rm-sub">局起才出现</span>
+          </div>
+          <div class="rm-item">
             <button class="rm-btn rm-save" id="saveDiceCfgBtn">💾 保存区间</button>
-            <span class="rm-tip">低区间生成小数（如 0.2-0.7），高区间生成整数（如 1-20）。</span>
+            <span class="rm-tip">低区间生成小数（如 0.2-0.7），高区间生成整数（如 1-20）。大数规则：第「大数局次」局之前出现的高位数都小于「大数门槛」，达到该局次后才可能摇到 10 以上的大数。</span>
           </div>
         </div>
       </div>
@@ -11313,7 +11338,12 @@ function renderParent(){
     if([lm,lx,hm,hx].some(v=>isNaN(v))){ showToast('区间请填数字哦～'); return; }
     if(lm>=lx){ showToast('低区间「最小」要小于「最大」哦～'); return; }
     if(hm>=hx){ showToast('高区间「最小」要小于「最大」哦～'); return; }
-    diceCfg = { lowMin:lm, lowMax:lx, highMin:hm, highMax:hx }; saveDiceCfg(); showToast('✅ 摇骰子区间已保存');
+    const bm = parseInt(main.querySelector('#diceBigMin').value,10);
+    const bf = parseInt(main.querySelector('#diceBigFrom').value,10);
+    if(isNaN(bm)||bm<1){ showToast('「大数门槛」请填 ≥1 的整数哦～'); return; }
+    if(isNaN(bf)||bf<1){ showToast('「大数局次」请填 ≥1 的整数哦～'); return; }
+    diceCfg = { lowMin:lm, lowMax:lx, highMin:hm, highMax:hx, bigMin:bm, bigFromRound:bf }; saveDiceCfg();
+    showToast('✅ 摇骰子区间已保存（第 '+bf+' 局起才出现 ≥'+bm+' 的大数）');
   };
   const spc = main.querySelector('#savePetCfgBtn');
   if(spc) spc.onclick = ()=>{
