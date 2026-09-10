@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609103" />
+<meta name="build-version" content="202609104" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -5521,17 +5521,17 @@ function renderStudy(){
     if(studyMode==='math'&&!mathState.q) ensureMath();
     else if(studyMode==='animal'&&!animalState) ensureAnimal();
     else if(studyMode==='science'&&!scienceState.q) ensureScience();
-    else if(studyMode==='proverb'&&studyNet==='online'&&!proverbOnline) ensureProverb();
+    else if(studyMode==='proverb'&&studyNet==='online'){ proverbNetFailed = false; ensureProverb(); }   // 主动切模式：清除失败标记重新尝试
     renderStudy();
   });
-  const seg = main.querySelector('#studyNetSeg'); if(seg) seg.querySelectorAll('.mode-btn').forEach(b=> b.onclick = ()=>{ studyNet=b.dataset.n; localStorage.setItem('kidtask_studynet_v1', studyNet); if(studyMode==='math'){ mathState.q=null; ensureMath(); } else if(studyMode==='animal'){ animalState=null; ensureAnimal(); } else if(studyMode==='science'){ scienceState.q=null; ensureScience(); } else if(studyMode==='proverb'){ proverbOnline=null; ensureProverb(); } else renderStudy(); syncStudyModelRow(); });
+  const seg = main.querySelector('#studyNetSeg'); if(seg) seg.querySelectorAll('.mode-btn').forEach(b=> b.onclick = ()=>{ studyNet=b.dataset.n; localStorage.setItem('kidtask_studynet_v1', studyNet); if(studyMode==='math'){ mathState.q=null; ensureMath(); } else if(studyMode==='animal'){ animalState=null; ensureAnimal(); } else if(studyMode==='science'){ scienceState.q=null; ensureScience(); } else if(studyMode==='proverb'){ proverbOnline=null; proverbNetFailed = false; ensureProverb(); } else renderStudy(); syncStudyModelRow(); });
   syncStudyModelRow();
   if(studyMode==='math') bindMath(); else if(studyMode==='animal') bindAnimal(); else if(studyMode==='proverb') bindProverb(); else bindScience();
   // 首次进入某模式时若内容缺失，自动出题（避免卡在「联网出题…」加载态且无按钮可生成）
   if(studyMode==='math' && !mathState.q && !mathState.loading) ensureMath();
   else if(studyMode==='animal' && !animalState) ensureAnimal();
   else if(studyMode==='science' && !scienceState.q && !scienceState.loading) ensureScience();
-  else if(studyMode==='proverb' && studyNet==='online' && !proverbOnline && !proverbLoading) ensureProverb();
+  else if(studyMode==='proverb' && studyNet==='online' && !proverbOnline && !proverbLoading && !proverbNetFailed) ensureProverb();  // 自动补题：失败后不再自动重试
 }
 /* 模型选择（侧栏 🤖模型）可见性：
    - 学习板块：按 quizMode，仅「🤖大模型」时显示，本地题库隐藏
@@ -5603,16 +5603,19 @@ function bindAnimal(){
 let proverbIdx = kkRand(PROVERBS.length);
 let proverbOnline = null;     // 联网获取的当前谚语 {en,zh}
 let proverbLoading = false;
+let proverbNetFailed = false;  // 联网获取失败标记：置位后不再由 renderStudy 自动重试，避免断网时无限递归刷屏（主动点「下一题」/切模式会清位重试）
 async function genStudyProverbOnline(){
   const p = `给 6-10 岁中国小学生出一条常用英语谚语（proverb / saying），并给出中文意思。只返回 JSON：{"en":"英语谚语原文","zh":"中文含义（用孩子能懂的话）"}，不要任何解释或多余文字。谚语要常见、积极、适合小学生。`;
   try{ const out = await llmChat(p, 0.8); const o = (typeof out==='string')?JSON.parse(out):out; if(o&&typeof o.en==='string'&&o.en.trim()&&typeof o.zh==='string'&&o.zh.trim()) return { en:o.en.trim(), zh:o.zh.trim() }; }catch(e){ console.warn('谚语联网获取失败：', e); } return null;
 }
 async function ensureProverb(){
+  if(proverbLoading) return;                 // 防重入：同一时刻只允许一个联网请求
   if(studyNet==='online'){
     proverbLoading = true; renderStudy();
     const o = await genStudyProverbOnline();
     proverbLoading = false;
-    if(o){ proverbOnline = o; renderStudy(); return; }
+    if(o){ proverbOnline = o; proverbNetFailed = false; renderStudy(); return; }
+    proverbNetFailed = true;                 // 失败：标记住，renderStudy 不再自动重试（否则断网时无限递归）
     showToast('⚠️ 联网获取谚语未成功，已用本地题库');
   }
   proverbOnline = null; renderStudy();
@@ -5653,7 +5656,7 @@ function renderProverb(){
 }
 function bindProverb(){
   const nx = main.querySelector('#proverbNext'); if(nx) nx.onclick = ()=>{
-    if(studyNet==='online'){ proverbOnline=null; ensureProverb(); }
+    if(studyNet==='online'){ proverbOnline=null; proverbNetFailed = false; ensureProverb(); }   // 手动「下一题」：清除失败标记重新尝试
     else { proverbIdx = kkRand(PROVERBS.length); renderStudy(); }
   };
   const rd = main.querySelector('#proverbRead'); if(rd) rd.onclick = ()=>{
