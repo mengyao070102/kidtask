@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609100" />
+<meta name="build-version" content="202609101" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -2658,9 +2658,10 @@ function deriveTaskCancel(t){
   else { t.cancelled = false; }
 }
 function starCount(){ const base = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + extra.stars; const spent = (dice && dice.used) ? dice.used : 0; return Math.max(0, base - spent); }
-/* 积分按「每个任务是否完成」计：一次性任务完成算 1 份；周期任务完成也算 1 份（不按天乘，与星星区分）。
-   注意：积分合计与星星（按天）口径不同，满足「积分按任务完成、星星按完成次数」的需求。 */
-function pointBalance(){ let s=0; for(const t of tasks){ if(!t.done||t.cancelled) continue; const v=Number(t.points)||Number(t.stars)||0; s+=v; } s+=extra.points; s-=redeemed.reduce((s2,r)=>s2+((r.status==='pending'||r.status==='approved')?(Number(r.cost)||0):0),0); return s; }
+/* 积分按「完成天数 × 每份分值」累计：周期任务每天完成各得 1 份（如 1~5 号每天完成、每份 1 分 = 5 分）；
+   一次性任务最多完成 1 天 = 1 份。与分页统计 buildEarnedMap/todayEarnedInfo（按天归属）口径统一。
+   撤销某天完成会减少对应天数，积分同步回退；兑换消耗（pending/approved）从余额中扣减。 */
+function pointBalance(){ let s=0; for(const t of tasks){ if(!t.done||t.cancelled) continue; const v=Number(t.points)||Number(t.stars)||0; s += v * taskDoneCount(t); } s+=extra.points; s-=redeemed.reduce((s2,r)=>s2+((r.status==='pending'||r.status==='approved')?(Number(r.cost)||0):0),0); return s; }
 
 function pendingCount(){ return redeemed.filter(r=>r.status==='pending').length; }
 
