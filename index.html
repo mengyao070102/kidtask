@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609101" />
+<meta name="build-version" content="202609102" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -2578,22 +2578,49 @@ function loadRewardDefs(){
   catch(e){ return DEFAULT_REWARDS.slice(); }
 }
 function saveRewardDefs(){ localStorage.setItem(RDEF_KEY, JSON.stringify(rewardDefs)); pushSync(); }
-/* 任务「已完成次数」：一次性任务完成即 1；周期任务按每天完成历史(doneDates)计数，一天算一次 */
-function taskDoneCount(t){
-  if(!t || !t.done) return 0;
-  if(!t.repeat || t.repeat==='once') return 1;
-  const arr = Array.isArray(t.doneDates) ? t.doneDates : (t.doneDate ? [t.doneDate] : []);
-  return arr.length;
+/* ===== 计分/计星的唯一真相：dayOps 里 d:1 的「完成」记录 =====
+   规则（用户明确要求）：只有真实点击完成才会计分、计星——
+     · 只数 dayOps 中 d===1 的日期（撤销 d:0 不算、从未点过的日期不算）
+     · 取消的任务整条不计（cancelled 直接跳过）
+     · 一次性任务最多算 1 次（首次完成那条）
+     · 不依赖 t.done 派生字段，避免派生滞后导致少算/多算 */
+function taskDoneDays(t){
+  if(!t || t.cancelled) return [];
+  const ops = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps : null;
+  let days;
+  if(ops) days = Object.keys(ops).filter(d => ops[d] && Number(ops[d].d) === 1).sort();
+  else if(t.done){
+    /* 无 dayOps 的老数据兜底：归属顺序与 ensureDayOps 迁移保持一致 doneDates → doneDate → doneAt，
+       避免「派生时机不同」导致同一份数据算出不同积分 */
+    let arr = (Array.isArray(t.doneDates) && t.doneDates.length) ? t.doneDates.slice()
+            : (t.doneDate ? [t.doneDate] : []);
+    if(!arr.length && t.doneAt){ try { arr = [fmtISO(new Date(Number(t.doneAt)))]; } catch(e){} }
+    days = arr.filter(Boolean).sort();
+  } else days = [];
+  if(!days.length) return [];
+  /* 一次性任务只算 1 次：日期取「最近一次完成」（与旧 doneDate 语义一致，日历归属不跳变） */
+  if(!t.repeat || t.repeat === 'once') days = [days[days.length - 1]];
+  return days;
 }
-/* 任务「完成日期列表」：一次性返回 [doneDate/doneAt 对应日]；周期返回 doneDates 全部日期（用于日历按天归属积分/星星） */
-function doneDateList(t){
-  if(!t || !t.done) return [];
-  if(t.repeat && t.repeat!=='once' && Array.isArray(t.doneDates) && t.doneDates.length) return t.doneDates.slice();
-  const out = [];
-  if(t.doneDate) out.push(t.doneDate);
-  else if(t.doneAt){ try { out.push(fmtISO(new Date(t.doneAt))); } catch(e){} }
-  return out;
+/* 任务「已完成次数」= 有效星星数（每次真实点击完成 +1 星） */
+function taskDoneCount(t){ return taskDoneDays(t).length; }
+/* 某一天完成时「当时」应得的积分：取该天记录的快照分值 p；无快照（老数据）才回退当前分值；当天未完成返回 0 */
+function dayDoneValue(t, iso){
+  if(!t || t.cancelled || !iso) return 0;
+  if(taskDoneDays(t).indexOf(iso) < 0) return 0;
+  const o = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps[iso] : null;
+  const p = o ? Number(o.p) : NaN;
+  if(!isNaN(p) && o && o.p != null) return p;
+  return Number(t.points) || Number(t.stars) || 0;
 }
+/* 整个任务累计应得积分 = Σ 每次真实完成当时的分值（改分值不追溯篡改历史） */
+function taskPointsEarned(t){
+  let s = 0;
+  for(const d of taskDoneDays(t)) s += dayDoneValue(t, d);
+  return s;
+}
+/* 任务「完成日期列表」：一次性返回首次完成日；周期返回全部完成日（用于日历按天归属积分/星星） */
+function doneDateList(t){ return taskDoneDays(t); }
 /* ===== 任务完成态：按天「最后操作胜」(dayOps) =====
    背景：早期合并用「done 取 OR + doneDates 并集」，导致「撤销完成」永远同步不过去
    （A 端撤销 done=false，B 端仍 true → OR 后仍是 true，撤销被吞，孩子端一直显示已完成）。
@@ -2613,7 +2640,8 @@ function ensureDayOps(t){
     if(Array.isArray(t.doneDates) && t.doneDates.length) arr = t.doneDates;
     else if(t.doneDate) arr = [t.doneDate];
     else if(at){ try { arr = [fmtISO(new Date(at))]; } catch(e){} }
-    for(const d of arr){ if(d) ops[d] = { d:1, ts: baseTs, at: at }; }
+    const p = Number(t.points) || Number(t.stars) || 0;   // 老数据无法还原当时的分值，按当前分值快照（与旧口径一致，不掉分）
+    for(const d of arr){ if(d) ops[d] = { d:1, ts: baseTs, at: at, p: p }; }
   }
   t.dayOps = ops;
   return ops;
@@ -2633,9 +2661,11 @@ function setTaskDayDone(t, day, isDone){
   if(!t) return;
   ensureDayOps(t);
   const d = day || fmtISO(todayInfo().date);
-  t.dayOps[d] = { d: isDone ? 1 : 0, ts: bumpSyncTs(), at: Date.now() };
+  /* p = 点击那一刻的任务分值快照：只有真实点击完成才计分，且按点击当时的分值计（之后改分值不追溯篡改历史） */
+  const _pv = Number(t.points) || Number(t.stars) || 0;
+  t.dayOps[d] = { d: isDone ? 1 : 0, ts: bumpSyncTs(), at: Date.now(), p: _pv };
   deriveTaskDone(t);
-  if(deviceRole === 'child') publishChildEvent({ kind:'taskDone', taskId:t.id, day:d, done:isDone?1:0 }); // 落地版方案B：孩子端完成/撤销发事件
+  if(deviceRole === 'child') publishChildEvent({ kind:'taskDone', taskId:t.id, day:d, done:isDone?1:0, pts:_pv }); // 落地版方案B：孩子端完成/撤销发事件
 }
 /* 取消 / 恢复取消：同样按「最后操作胜」，让「取消」和「恢复」都能跨端传播。
    取消时清空完成态（与原行为一致：取消后不再显示已完成，恢复后需重新完成） */
@@ -2661,7 +2691,7 @@ function starCount(){ const base = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + e
 /* 积分按「完成天数 × 每份分值」累计：周期任务每天完成各得 1 份（如 1~5 号每天完成、每份 1 分 = 5 分）；
    一次性任务最多完成 1 天 = 1 份。与分页统计 buildEarnedMap/todayEarnedInfo（按天归属）口径统一。
    撤销某天完成会减少对应天数，积分同步回退；兑换消耗（pending/approved）从余额中扣减。 */
-function pointBalance(){ let s=0; for(const t of tasks){ if(!t.done||t.cancelled) continue; const v=Number(t.points)||Number(t.stars)||0; s += v * taskDoneCount(t); } s+=extra.points; s-=redeemed.reduce((s2,r)=>s2+((r.status==='pending'||r.status==='approved')?(Number(r.cost)||0):0),0); return s; }
+function pointBalance(){ let s=0; for(const t of tasks){ s += taskPointsEarned(t); } s+=extra.points; s-=redeemed.reduce((s2,r)=>s2+((r.status==='pending'||r.status==='approved')?(Number(r.cost)||0):0),0); return s; }
 
 function pendingCount(){ return redeemed.filter(r=>r.status==='pending').length; }
 
@@ -10153,39 +10183,38 @@ function doneOnDay(t, d){
 }
 /* 精确到「今天自然日」完成的任务（单次按 doneDate/doneAt，周期按 doneDates 历史） */
 function earnedToday(t){
-  if(!t.done || t.cancelled) return false;
+  if(!t || t.cancelled) return false;
   const iso = fmtISO(todayInfo().date);
-  return doneDateList(t).includes(iso);
+  return taskDoneDays(t).indexOf(iso) >= 0;
 }
-/* 某页面类型（'school'/'outside'）今天已完成任务数与获得积分 */
+/* 某页面类型（'school'/'outside'）今天已完成任务数与获得积分（积分为当天完成时的快照分值） */
 function todayEarnedInfo(type){
   let cnt = 0, pts = 0;
   for(const t of tasks){
     if(t.type !== type || !earnedToday(t)) continue;
     cnt++;
-    pts += Number(t.points) || Number(t.stars) || 0;
+    pts += dayDoneValue(t, fmtISO(todayInfo().date));
   }
   return { cnt, pts };
 }
-/* 某页面类型在「指定日期」已完成任务数与获得积分（周期任务按 doneDates 把每次完成归属到对应日期） */
+/* 某页面类型在「指定日期」已完成任务数与获得积分（周期任务按完成记录把每次完成归属到对应日期） */
 function earnedOnDate(type, d){
   const iso = fmtISO(d); let cnt = 0, pts = 0;
   for(const t of tasks){
-    if(t.type !== type || !t.done || t.cancelled) continue;
-    if(!doneDateList(t).includes(iso)) continue;
-    cnt++; pts += Number(t.points) || Number(t.stars) || 0;
+    if(t.type !== type || t.cancelled) continue;
+    if(taskDoneDays(t).indexOf(iso) < 0) continue;
+    cnt++; pts += dayDoneValue(t, iso);
   }
   return { cnt, pts };
 }
-/* 渲染前一次性遍历 tasks 建积分表，避免日历/周视图每格都遍历全量 tasks（去 N²）。周期任务按 doneDates 把每次完成分别归属到对应日期 */
+/* 渲染前一次性遍历 tasks 建积分表，避免日历/周视图每格都遍历全量 tasks（去 N²）。周期任务按每次完成记录分别归属到对应日期，分值取当天快照 */
 function buildEarnedMap(type){
   const m = {};
   for(const t of tasks){
-    if(t.type !== type || !t.done || t.cancelled) continue;
-    const v = Number(t.points) || Number(t.stars) || 0;
-    for(const iso of doneDateList(t)){
+    if(t.type !== type || t.cancelled) continue;
+    for(const iso of taskDoneDays(t)){
       const e = m[iso] || (m[iso] = { cnt:0, pts:0 });
-      e.cnt++; e.pts += v;
+      e.cnt++; e.pts += dayDoneValue(t, iso);
     }
   }
   return m;
@@ -10988,9 +11017,17 @@ function fmtDT(ts){ try { return new Date(ts).toLocaleString('zh-CN',{year:'nume
 function pointLedger(){
   const rows = [];
   tasks.forEach(t=>{
-    if(t.done && (Number(t.points)||0) > 0){
-      const at = t.doneAt || (t.doneDate ? new Date(t.doneDate.replace(/-/g,'/')).getTime() : 0) || Date.now();
-      rows.push({ at, src: t.title, pts:Number(t.points) });   // 任务来源：显示创建时的名称
+    if(t.cancelled) return;
+    const ops = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps : null;
+    /* 每次「点击完成」各记一条，分值为点击当时的快照，与总账 pointBalance 完全同源（周期任务完成 N 天 = N 条） */
+    for(const d of taskDoneDays(t)){
+      const v = dayDoneValue(t, d);
+      if(!(v > 0)) continue;
+      const o = ops ? ops[d] : null;
+      let at = (o && Number(o.at)) || 0;
+      if(!at && d){ try { at = new Date(String(d).replace(/-/g,'/')).getTime(); } catch(e){ at = 0; } }
+      if(!at) at = Number(t.doneAt) || Date.now();
+      rows.push({ at, src: t.title + '（' + mdLabel(d) + '）', pts: v });
     }
   });
   extraLog.forEach(r=>{
@@ -11767,7 +11804,8 @@ function handleChildEvent(payload){
         ensureDayOps(t);
         const cur = t.dayOps[ev.day];
         if(!cur || (Number(ev.ts)||0) >= (Number(cur.ts)||0)){   // 按天最后操作胜（与孩子端 dayOps 语义一致）
-          t.dayOps[ev.day] = { d: ev.done ? 1 : 0, ts: Number(ev.ts)||0, at: Number(ev.ts)||0 };
+          const _pv = (ev.pts != null) ? (Number(ev.pts)||0) : (Number(t.points)||Number(t.stars)||0);  // 沿用孩子端点击时的分值快照
+          t.dayOps[ev.day] = { d: ev.done ? 1 : 0, ts: Number(ev.ts)||0, at: Number(ev.ts)||0, p: _pv };
           deriveTaskDone(t);
         }
         save();
