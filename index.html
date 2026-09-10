@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609098" />
+<meta name="build-version" content="202609100" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -2413,6 +2413,10 @@
 /* ============ 数据层 ============ */
 const KEY = 'kidtask_v1';
 let tasks = load();
+/* 加载即自愈：完成态一律由 dayOps 派生，避免「dayOps 已记录完成但 done 字段仍是旧值」
+   导致页面显示未完成、积分少算（表现为「点了完成任务状态没更新、积分不对」） */
+function deriveAllTasks(){ for(const _t of tasks){ if(!_t) continue; ensureDayOps(_t); deriveTaskDone(_t); deriveTaskCancel(_t); } }
+deriveAllTasks();
 let taskTimerTick = null;   // 任务计时全局刷新定时器
 function load(){ try { const a = JSON.parse(localStorage.getItem(KEY)) || []; return a.map(t => ({ timed:false, timerStartAt:null, elapsed:0, ...t, approved:true })); } catch(e){ return []; } }
 function save(){ localStorage.setItem(KEY, JSON.stringify(tasks)); pushSync(); }
@@ -11684,7 +11688,8 @@ function collectSyncState(){
     extra,
     extraLog,
     starLog,
-    checkin,
+    /* 打卡只同步孩子端的记录：家长端快照不带 checkin，避免家长端打卡覆盖孩子的连续记录 */
+    checkin: deviceRole === 'child' ? checkin : undefined,
     earnedBadges,
     knowledgeType,
     redeemed,
@@ -11822,7 +11827,7 @@ function applySyncState(obj){
       for(const rt of obj.tasks){
         if(!rt || !rt.id) continue;
         const lt = byId[rt.id];
-        if(!lt){ byId[rt.id] = Object.assign({ timed:false, timerStartAt:null, elapsed:0 }, rt); continue; } // 远端独有任务直接并入
+        if(!lt){ const _nt = Object.assign({ timed:false, timerStartAt:null, elapsed:0 }, rt); ensureDayOps(_nt); deriveTaskDone(_nt); deriveTaskCancel(_nt); byId[rt.id] = _nt; continue; } // 远端独有任务直接并入（同样派生完成态，避免字段与 dayOps 不一致）
         // 冲突判定：本端曾编辑(local ts>0)且该编辑尚未同步(lastRemoteTsPrev < 本地ts)，远端又有更新的编辑(ts 更大)→ 本端编辑被覆盖
         const _lt = Number(lt.ts)||0, _rt = Number(rt.ts)||0;
         if(_lt > 0 && _lt > lastRemoteTsPrev && _rt > _lt){
@@ -11832,6 +11837,7 @@ function applySyncState(obj){
         byId[rt.id] = mergeTask(lt, rt);                                  // 共有任务按 id 合并（防覆盖）
       }
       tasks = Object.keys(byId).map(id => Object.assign({ timed:false, timerStartAt:null, elapsed:0 }, byId[id]));
+      deriveAllTasks();                                                        // 合并后统一派生，保证三端状态与积分口径一致
       save();
       // 冲突提示：仅在首次合并之后（避免首连刷屏）才弹，告知家长哪些本地编辑被对端较新修改覆盖
       if(syncFirstApplied && syncConflicts.length){
