@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609102" />
+<meta name="build-version" content="202609103" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -2581,11 +2581,11 @@ function saveRewardDefs(){ localStorage.setItem(RDEF_KEY, JSON.stringify(rewardD
 /* ===== 计分/计星的唯一真相：dayOps 里 d:1 的「完成」记录 =====
    规则（用户明确要求）：只有真实点击完成才会计分、计星——
      · 只数 dayOps 中 d===1 的日期（撤销 d:0 不算、从未点过的日期不算）
-     · 取消的任务整条不计（cancelled 直接跳过）
-     · 一次性任务最多算 1 次（首次完成那条）
+     · 取消任务**不清零历史**：取消前点过的完成照常计分计星（cancelled 不再拦截）
+     · 一次性任务最多算 1 次（最近一次完成那条）
      · 不依赖 t.done 派生字段，避免派生滞后导致少算/多算 */
 function taskDoneDays(t){
-  if(!t || t.cancelled) return [];
+  if(!t) return [];
   const ops = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps : null;
   let days;
   if(ops) days = Object.keys(ops).filter(d => ops[d] && Number(ops[d].d) === 1).sort();
@@ -2606,7 +2606,7 @@ function taskDoneDays(t){
 function taskDoneCount(t){ return taskDoneDays(t).length; }
 /* 某一天完成时「当时」应得的积分：取该天记录的快照分值 p；无快照（老数据）才回退当前分值；当天未完成返回 0 */
 function dayDoneValue(t, iso){
-  if(!t || t.cancelled || !iso) return 0;
+  if(!t || !iso) return 0;      // 取消任务的历史完成同样计分（口径见 taskDoneDays）
   if(taskDoneDays(t).indexOf(iso) < 0) return 0;
   const o = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps[iso] : null;
   const p = o ? Number(o.p) : NaN;
@@ -2661,24 +2661,22 @@ function setTaskDayDone(t, day, isDone){
   if(!t) return;
   ensureDayOps(t);
   const d = day || fmtISO(todayInfo().date);
-  /* p = 点击那一刻的任务分值快照：只有真实点击完成才计分，且按点击当时的分值计（之后改分值不追溯篡改历史） */
-  const _pv = Number(t.points) || Number(t.stars) || 0;
+  /* p = 完成时应计的分值快照：只有真实点击完成才计分，且按点击当时的分值计（之后改分值不追溯篡改历史）。
+     ⚠️ 若这一天此前已有记录（撤销后再点完成），沿用原快照 → 「点过完成又撤销」能精确恢复到之前的积分和星星 */
+  const _prev = t.dayOps[d];
+  const _pv = (_prev && _prev.p != null) ? _prev.p : (Number(t.points) || Number(t.stars) || 0);
   t.dayOps[d] = { d: isDone ? 1 : 0, ts: bumpSyncTs(), at: Date.now(), p: _pv };
   deriveTaskDone(t);
   if(deviceRole === 'child') publishChildEvent({ kind:'taskDone', taskId:t.id, day:d, done:isDone?1:0, pts:_pv }); // 落地版方案B：孩子端完成/撤销发事件
 }
 /* 取消 / 恢复取消：同样按「最后操作胜」，让「取消」和「恢复」都能跨端传播。
-   取消时清空完成态（与原行为一致：取消后不再显示已完成，恢复后需重新完成） */
+   ⚠️ 取消**不再清空**历史完成记录（2026-09-10 用户口径）：
+   之前取消会把所有 d:1 写成 d:0，导致「以前点完成赚到的积分和星星被清零且恢复不回来」。
+   现在只标记 cancelled——历史已获得的积分/星星原样保留，取消后仅停止新增完成（卡片不可点），
+   恢复取消后历史完成态也还在，不需要重新完成。 */
 function setTaskCancel(t, isCancel, reason){
   if(!t) return;
   t.cancelOp = { c: isCancel ? 1 : 0, ts: bumpSyncTs(), reason: (reason != null ? String(reason) : (t.reason || '')) };
-  if(isCancel){
-    ensureDayOps(t);
-    for(const d of Object.keys(t.dayOps)){
-      if(t.dayOps[d] && t.dayOps[d].d === 1) t.dayOps[d] = { d:0, ts: bumpSyncTs(), at: Date.now() };
-    }
-    deriveTaskDone(t);
-  }
   deriveTaskCancel(t);
 }
 function deriveTaskCancel(t){
@@ -3345,8 +3343,8 @@ function updateBadges(){
    confirmMode=true 时，点击任务弹「完成/撤销」确认弹窗（首页今日任务用）；否则保持点击即切换。 */
 function taskBlock(t, date, confirmMode, simple){
   const d = date || null;
-  const isDone = d ? doneOnDay(t, d) : !!t.done;
   const isCancelled = !!t.cancelled;
+  const isDone = !isCancelled && (d ? doneOnDay(t, d) : !!t.done);
   const b = document.createElement('div');
   b.className = `task-block ${t.timed?'has-timer':''} ${isDone?'done':''} ${isCancelled?'cancelled':''}`;
   b.style.background = taskColor(t);
@@ -3966,7 +3964,7 @@ const BADGES = [
   { id:'math', emoji:'🧠', name:'口算小能手', cond:'口算累计 20 题', test:()=>mathRec.total>=20 },
   { id:'pts',  emoji:'💎', name:'积分小富豪', cond:'积分余额 100',   test:()=>pointBalance()>=100 },
   { id:'star', emoji:'⭐', name:'星星收集家', cond:'星星 20 颗',     test:()=>starCount()>=20 },
-  { id:'task', emoji:'📚', name:'学习小博士', cond:'完成任务 10 个', test:()=>tasks.filter(t=>t.done).length>=10 },
+  { id:'task', emoji:'📚', name:'学习小博士', cond:'完成任务 10 个', test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=10 },
   { id:'fam',  emoji:'🤝', name:'亲子好搭档', cond:'完成 1 个亲子挑战', test:()=>challenges.filter(c=>c.status==='approved').length>=1 },
   { id:'book', emoji:'📖', name:'绘本小作家', cond:'创作 1 本绘本',   test:()=>bookList.length>=1 },
   { id:'adv',  emoji:'📖', name:'知识小达人', cond:'读完今日知识 1 次', test:()=> knowReadToday() }
@@ -9929,7 +9927,7 @@ function renderPublishCal(type, isSchool, today, dated){
 
 /* ---- 我的任务 ---- */
 function renderAll(){
-  const doneCount = tasks.filter(t=>taskVisible(t)&&t.done).length;
+  const doneCount = tasks.filter(t=>taskVisible(t)&&t.done&&!t.cancelled).length;
   main.innerHTML = `
     <h1 class="page-title">💖 我的任务</h1>
     <p class="page-sub">这里能看到所有任务，点 ✅ 完成、点 🚫 取消，都能收集积分！</p>
@@ -9951,7 +9949,7 @@ function paintAll(){
   list.innerHTML = '';
   let items = tasks.filter(taskVisible).sort((a,b)=> (Number(!!b.done)-Number(!!a.done)) || (Number(!!b.cancelled)-Number(!!a.cancelled)) || (b.createdAt-a.createdAt));
   if(allFilter==='pending') items = items.filter(t=>!t.done && !t.cancelled);
-  if(allFilter==='done') items = items.filter(t=>t.done);
+  if(allFilter==='done') items = items.filter(t=>t.done && !t.cancelled);
   if(allFilter==='cancelled') items = items.filter(t=>t.cancelled);
   if(!items.length) list.innerHTML = `<div class="empty"><span class="big">🎈</span>这里还没有任务哦～</div>`;
   else items.forEach(t=> list.appendChild(taskCard(t)));
@@ -10009,7 +10007,8 @@ function endTaskTimer(t){            // 点击「结束」：停止计时 + 完�
 function taskCard(t, date){
   const el = document.createElement('div');
   const d = date ? fmtISO(date) : null;
-  const isDone = date ? doneOnDay(t, date) : !!t.done, isCancelled = !!t.cancelled;
+  const isCancelled = !!t.cancelled;
+  const isDone = !isCancelled && (date ? doneOnDay(t, date) : !!t.done);
   el.className = `task ${t.type} ${isDone?'done':''} ${isCancelled?'cancelled':''}`;
   const cancelReasonHtml = (isCancelled && t.reason)
     ? `<p class="t-reason" data-reason="1"><span class="r-label">💬 取消原因：</span>${esc(t.reason)}</p>`
@@ -10175,7 +10174,7 @@ function taskMatchesDate(t, d){
 }
 /* 判断任务在指定日期是否“已完成”。重复任务按 doneDates(每天完成历史) 判定当天完成 */
 function doneOnDay(t, d){
-  if(!t.done) return false;
+  if(!t || t.cancelled || !t.done) return false;   // 取消态优先显示（历史积分/星星仍保留，见 taskDoneDays）
   if(!t.repeat || t.repeat==='once') return true;
   const iso = fmtISO(d);
   if(Array.isArray(t.doneDates) && t.doneDates.includes(iso)) return true;
@@ -10183,7 +10182,7 @@ function doneOnDay(t, d){
 }
 /* 精确到「今天自然日」完成的任务（单次按 doneDate/doneAt，周期按 doneDates 历史） */
 function earnedToday(t){
-  if(!t || t.cancelled) return false;
+  if(!t) return false;
   const iso = fmtISO(todayInfo().date);
   return taskDoneDays(t).indexOf(iso) >= 0;
 }
@@ -10201,7 +10200,7 @@ function todayEarnedInfo(type){
 function earnedOnDate(type, d){
   const iso = fmtISO(d); let cnt = 0, pts = 0;
   for(const t of tasks){
-    if(t.type !== type || t.cancelled) continue;
+    if(t.type !== type) continue;
     if(taskDoneDays(t).indexOf(iso) < 0) continue;
     cnt++; pts += dayDoneValue(t, iso);
   }
@@ -10211,7 +10210,7 @@ function earnedOnDate(type, d){
 function buildEarnedMap(type){
   const m = {};
   for(const t of tasks){
-    if(t.type !== type || t.cancelled) continue;
+    if(t.type !== type) continue;
     for(const iso of taskDoneDays(t)){
       const e = m[iso] || (m[iso] = { cnt:0, pts:0 });
       e.cnt++; e.pts += dayDoneValue(t, iso);
@@ -11017,7 +11016,6 @@ function fmtDT(ts){ try { return new Date(ts).toLocaleString('zh-CN',{year:'nume
 function pointLedger(){
   const rows = [];
   tasks.forEach(t=>{
-    if(t.cancelled) return;
     const ops = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps : null;
     /* 每次「点击完成」各记一条，分值为点击当时的快照，与总账 pointBalance 完全同源（周期任务完成 N 天 = N 条） */
     for(const d of taskDoneDays(t)){
