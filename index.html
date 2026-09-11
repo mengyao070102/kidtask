@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609107" />
+<meta name="build-version" content="202609108" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -10927,20 +10927,50 @@ document.getElementById('fab').onclick = ()=> openModal();
 const TT_KEY = 'kidtask_timetable_v1';
 const TT_TS_KEY = 'kidtask_ttts';
 const TT_DN = { 1:'周一', 2:'周二', 3:'周三', 4:'周四', 5:'周五', 6:'周六', 7:'周日' };
+/* 真实课表（二(4)班，按家长 2026-09-11 提供的课程时间表录入，截取到 15:45，共 8 节） */
 function defaultPeriods(){
-  return [ {s:'08:20',e:'09:00'}, {s:'09:10',e:'09:50'}, {s:'10:00',e:'10:40'},
-           {s:'10:50',e:'11:30'}, {s:'14:00',e:'14:40'}, {s:'14:50',e:'15:30'} ];
+  return [ {s:'08:20',e:'09:00'}, {s:'09:15',e:'09:55'}, {s:'09:55',e:'10:25'},
+           {s:'10:25',e:'11:05'}, {s:'11:15',e:'12:00'}, {s:'13:30',e:'14:10'},
+           {s:'14:15',e:'14:55'}, {s:'15:05',e:'15:45'} ];
 }
 function defaultGrid(){
   return {
-    '1':['语文','数学','英语','体育','科学','自习'],
-    '2':['数学','语文','英语','音乐','写字','体育'],
-    '3':['语文','英语','数学','美术','科学','阅读'],
-    '4':['数学','语文','英语','体育','道法','自习'],
-    '5':['语文','数学','英语','音乐','体育','班会'],
-    '6':['','','','','',''],
-    '7':['','','','','','']
+    '1':['语文','综合实践','体育大课间','美术','美术','体育','体育大课堂','课后服务一'],
+    '2':['数学','语文','体育大课间','体育','德法','科学','体育大课堂','课后服务一'],
+    '3':['语文','数学','体育大课间','体育','德法','劳动','体育大课堂','课后服务一'],
+    '4':['语文','音乐','体育大课间','数学','语文','心育/语文','体育大课堂','课后服务一'],
+    '5':['数学','语文','体育大课间','音乐','体育','班会','体育大课堂','英语'],
+    '6':['','','','','','','',''],
+    '7':['','','','','','','','']
   };
+}
+/* 旧版示例默认课表（v107）：识别「从未真正编辑过」的数据，自动升级为上面的真实课表 */
+function isLegacyDefaultTT(o){
+  try{
+    const dp = [ {s:'08:20',e:'09:00'}, {s:'09:10',e:'09:50'}, {s:'10:00',e:'10:40'},
+                 {s:'10:50',e:'11:30'}, {s:'14:00',e:'14:40'}, {s:'14:50',e:'15:30'} ];
+    const dg = {
+      '1':['语文','数学','英语','体育','科学','自习'],
+      '2':['数学','语文','英语','音乐','写字','体育'],
+      '3':['语文','英语','数学','美术','科学','阅读'],
+      '4':['数学','语文','英语','体育','道法','自习'],
+      '5':['语文','数学','英语','音乐','体育','班会'],
+      '6':['','','','','',''],
+      '7':['','','','','','']
+    };
+    if(!o || !Array.isArray(o.periods) || o.periods.length !== dp.length) return false;
+    for(let i=0;i<dp.length;i++){
+      if(String((o.periods[i]||{}).s) !== dp[i].s || String((o.periods[i]||{}).e) !== dp[i].e) return false;
+    }
+    if(!o.grid || typeof o.grid !== 'object') return false;
+    for(let d=1; d<=7; d++){
+      const row = Array.isArray(o.grid[String(d)]) ? o.grid[String(d)] : [];
+      for(let i=0;i<dp.length;i++){
+        if(String(row[i]||'') !== dg[String(d)][i]) return false;
+      }
+    }
+    return true;
+  }catch(e){ return false; }
 }
 function normalizeTimetable(o){
   try{
@@ -10957,7 +10987,13 @@ function normalizeTimetable(o){
     return { periods, grid, showWeekend: !!o.showWeekend };
   }catch(e){ return { periods:defaultPeriods(), grid:defaultGrid(), showWeekend:false }; }
 }
-function loadTimetable(){ try{ return normalizeTimetable(JSON.parse(localStorage.getItem(TT_KEY))); }catch(e){ return normalizeTimetable(null); } }
+function loadTimetable(){
+  try{
+    const o = JSON.parse(localStorage.getItem(TT_KEY));
+    if(isLegacyDefaultTT(o)) return normalizeTimetable(null);   // 旧示例课表 → 升级为真实课表
+    return normalizeTimetable(o);
+  }catch(e){ return normalizeTimetable(null); }
+}
 let timetable = loadTimetable();
 let ttTs = Number(localStorage.getItem(TT_TS_KEY)) || 0;
 function touchTimetableTs(){
@@ -12169,7 +12205,7 @@ function applySyncState(obj){
     if(obj.grade != null){ const _gt = Number(obj.gTs)||0; if((_gt===0 && gradeTs===0) || _gt > gradeTs){ grade = obj.grade; if(_gt>gradeTs) gradeTs = _gt; try { localStorage.setItem(GKEY, grade); } catch(e){} } }
     if(obj.semester != null){ const _st = Number(obj.sTs)||0; if((_st===0 && semTs===0) || _st > semTs){ semester = obj.semester; if(_st>semTs) semTs = _st; try { localStorage.setItem(SKEY, semester); } catch(e){} } }
     if(obj.pin != null){ const _pt = Number(obj.pTs)||0; if((_pt===0 && pinTs===0) || _pt > pinTs){ try { setPin(String(obj.pin)); } catch(e){} if(_pt>pinTs) pinTs = _pt; } } // 家长密码按 ts 取较新，各端保持一致
-    if(obj.timetable && typeof obj.timetable === 'object'){   // 课程表：按 ttTs 取较新，最后编辑者胜
+    if(obj.timetable && typeof obj.timetable === 'object' && !isLegacyDefaultTT(obj.timetable)){   // 课程表：按 ttTs 取较新，最后编辑者胜；远端旧示例课表不采纳（避免覆盖真实课表）
       const _tt = Number(obj.ttTs)||0;
       if((_tt===0 && ttTs===0) || _tt > ttTs){
         timetable = normalizeTimetable(obj.timetable);
@@ -12292,6 +12328,15 @@ function connectSync(){
   bindPressedFx();
 applyTheme(getTheme());
 render();
+/* 课程表升级：本机无课表数据或仍是旧示例默认时，落盘真实课表（二(4)班）并随同步推给其他设备 */
+try {
+  (function migrateTimetable(){
+    const raw = localStorage.getItem(TT_KEY);
+    let need = !raw;
+    if(!need){ try{ need = isLegacyDefaultTT(JSON.parse(raw)); }catch(e){ need = false; } }
+    if(need) saveTimetable();
+  })();
+} catch(e){}
 connectSync();
 /* 节假日：启动后静默联网刷新「今年」数据（仅当当前正在查看今年时才重渲染，避免打断） */
 (async()=>{ try { const y = new Date().getFullYear(); const m = await fetchHolidays(y); if(m && typeof calYear==='number' && calYear===y) render(); } catch(e){} })();
