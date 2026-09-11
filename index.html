@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609105" />
+<meta name="build-version" content="202609106" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -1084,6 +1084,12 @@
   .checkin-done { color:#2f8f63; font-weight:700; }
   /* ---- 徽章墙 ---- */
   .badge-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(118px,1fr)); gap:12px; margin:10px 0 4px; }
+  .badge-group { margin:12px 0 6px; }
+  .badge-wall-h { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+  .bw-toggle { font-size:12px; font-weight:700; color:#9a8a96; background:var(--accent-soft); border-radius:999px; padding:2px 9px; }
+  .badge-wall.collapsed { display:none; }
+  .badge-group-t { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:#7a3a5a; margin-bottom:2px; }
+  .badge-group-n { font-size:12px; font-weight:700; color:#9a8a96; background:var(--accent-soft); border-radius:999px; padding:1px 8px; }
   .badge { background:#fff; border:2px solid var(--accent-soft); border-radius:14px; padding:14px 8px; text-align:center; transition:.15s; }
   .badge.locked { filter:grayscale(1); opacity:.5; }
   .badge-emoji { font-size:34px; }
@@ -3958,37 +3964,92 @@ function checkinHtml(){
     <button class="btn primary" id="checkinBtn">打卡 +1 积分</button>
   </div>`;
 }
+/* 徽章按主题分组：打卡 → 学习 → 任务 → 积分星星 → 亲子创作 → 宠物庄园。
+   ⚠️ 新增徽章时 test 里引用的变量可能尚未初始化（BADGES 定义早于 pets/manor 等），
+      所以统一走 safeBadgeTest 包 try/catch，单个条件出错不会拖垮整面徽章墙。 */
 const BADGES = [
-  { id:'ck7',  emoji:'🌟', name:'坚持星',     cond:'连续打卡 7 天',  test:()=>checkin.streak>=7 },
-  { id:'ck30', emoji:'👑', name:'打卡王',     cond:'连续打卡 30 天', test:()=>checkin.streak>=30 },
-  { id:'math', emoji:'🧠', name:'口算小能手', cond:'口算累计 20 题', test:()=>mathRec.total>=20 },
-  { id:'pts',  emoji:'💎', name:'积分小富豪', cond:'积分余额 100',   test:()=>pointBalance()>=100 },
-  { id:'star', emoji:'⭐', name:'星星收集家', cond:'星星 20 颗',     test:()=>starCount()>=20 },
-  { id:'task', emoji:'📚', name:'学习小博士', cond:'完成任务 10 个', test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=10 },
-  { id:'fam',  emoji:'🤝', name:'亲子好搭档', cond:'完成 1 个亲子挑战', test:()=>challenges.filter(c=>c.status==='approved').length>=1 },
-  { id:'book', emoji:'📖', name:'绘本小作家', cond:'创作 1 本绘本',   test:()=>bookList.length>=1 },
-  { id:'adv',  emoji:'📖', name:'知识小达人', cond:'读完今日知识 1 次', test:()=> knowReadToday() }
+  /* 每日打卡 */
+  { id:'ck3',   emoji:'🌱', name:'萌芽新星',   cond:'连续打卡 3 天',   test:()=>checkin.streak>=3, g:'☀️ 每日打卡' },
+  { id:'ck7',   emoji:'🌟', name:'坚持星',     cond:'连续打卡 7 天',   test:()=>checkin.streak>=7, g:'☀️ 每日打卡' },
+  { id:'ck30',  emoji:'👑', name:'打卡王',     cond:'连续打卡 30 天',  test:()=>checkin.streak>=30, g:'☀️ 每日打卡' },
+  { id:'ckAll30', emoji:'📆', name:'月月坚持', cond:'累计打卡 30 天',  test:()=>checkin.total>=30, g:'☀️ 每日打卡' },
+  { id:'ckAll100',emoji:'🏆', name:'百日坚持', cond:'累计打卡 100 天', test:()=>checkin.total>=100, g:'☀️ 每日打卡' },
+  /* 学习练习 */
+  { id:'math',  emoji:'🧠', name:'口算小能手', cond:'口算累计 20 题',  test:()=>mathRec.total>=20, g:'📖 学习练习' },
+  { id:'math50',emoji:'🧮', name:'口算达人',   cond:'口算累计 50 题',  test:()=>mathRec.total>=50, g:'📖 学习练习' },
+  { id:'math100',emoji:'🥇',name:'计算王者',   cond:'口算累计 100 题', test:()=>mathRec.total>=100, g:'📖 学习练习' },
+  { id:'adv',   emoji:'💡', name:'知识小达人', cond:'读完今日知识 1 次', test:()=> knowReadToday(), g:'📖 学习练习' },
+  { id:'know7', emoji:'📚', name:'知识小行家', cond:'累计读完 7 天每日知识', test:()=>Object.keys(loadKnowRead()||{}).length>=7, g:'📖 学习练习' },
+  /* 任务完成 */
+  { id:'task',  emoji:'📖', name:'学习小博士', cond:'完成任务 10 个',  test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=10, g:'✅ 任务完成' },
+  { id:'task30',emoji:'🎯', name:'任务达人',   cond:'完成任务 30 个',  test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=30, g:'✅ 任务完成' },
+  { id:'task100',emoji:'👑',name:'任务大师',   cond:'完成任务 100 个', test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=100, g:'✅ 任务完成' },
+  /* 积分与星星 */
+  { id:'pts',   emoji:'💎', name:'积分小富豪', cond:'积分余额 100',    test:()=>pointBalance()>=100, g:'💎 积分星星' },
+  { id:'pts300',emoji:'💰', name:'积分大富豪', cond:'积分余额 300',    test:()=>pointBalance()>=300, g:'💎 积分星星' },
+  { id:'star',  emoji:'⭐', name:'星星收集家', cond:'星星 20 颗',      test:()=>starCount()>=20, g:'💎 积分星星' },
+  { id:'star50',emoji:'✨', name:'星光闪闪',   cond:'星星 50 颗',      test:()=>starCount()>=50, g:'💎 积分星星' },
+  { id:'star100',emoji:'🌌',name:'银河收集者', cond:'星星 100 颗',     test:()=>starCount()>=100, g:'💎 积分星星' },
+  /* 亲子与创作 */
+  { id:'fam',   emoji:'🤝', name:'亲子好搭档', cond:'完成 1 个亲子挑战', test:()=>challenges.filter(c=>c.status==='approved').length>=1, g:'🤝 亲子创作' },
+  { id:'fam5',  emoji:'💞', name:'默契搭档',   cond:'完成 5 个亲子挑战', test:()=>challenges.filter(c=>c.status==='approved').length>=5, g:'🤝 亲子创作' },
+  { id:'book',  emoji:'📔', name:'绘本小作家', cond:'创作 1 本绘本',   test:()=>bookList.length>=1, g:'🤝 亲子创作' },
+  { id:'book3', emoji:'✍️', name:'小小作家',   cond:'创作 3 本绘本',   test:()=>bookList.length>=3, g:'🤝 亲子创作' },
+  { id:'rdm5',  emoji:'🎁', name:'兑奖小能手', cond:'兑换奖励 5 次',   test:()=>redeemed.filter(r=>r.status==='approved').length>=5, g:'🤝 亲子创作' },
+  /* 宠物与庄园 */
+  { id:'pet3',  emoji:'🐾', name:'宠物好朋友', cond:'宠物升到 3 级',   test:()=>(Array.isArray(pets)?pets:[]).some(p=>p&&Number(p.level)>=3), g:'🐾 宠物庄园' },
+  { id:'mnlv3', emoji:'🏡', name:'庄园小主人', cond:'庄园升到 3 级',   test:()=>manor && Number(manor.level)>=3, g:'🐾 宠物庄园' }
 ];
+/* 单个徽章条件求值（带兜底，避免某个数据源未就绪导致整面墙崩掉） */
+function safeBadgeTest(b){ try{ return !!b.test(); }catch(e){ return false; } }
 function loadBadges(){ try{ const a=JSON.parse(localStorage.getItem(BADGE_KEY)); if(Array.isArray(a)) return a; }catch(e){} return []; }
 let earnedBadges = loadBadges();
 let badgesInitDone = false;
 function refreshBadges(){
   let changed=false, fresh=[];
-  BADGES.forEach(b=>{ if(b.test() && !earnedBadges.includes(b.id)){ earnedBadges.push(b.id); changed=true; fresh.push(b); } });
+  BADGES.forEach(b=>{ if(safeBadgeTest(b) && !earnedBadges.includes(b.id)){ earnedBadges.push(b.id); changed=true; fresh.push(b); } });
   if(changed){ try{ localStorage.setItem(BADGE_KEY, JSON.stringify(earnedBadges)); }catch(e){} pushSync(); }
   if(badgesInitDone){ fresh.forEach(b=> showToast('🏅 解锁新徽章：'+b.name+'！')); }
   badgesInitDone = true;
 }
 function badgeWallHtml(){
-  return `<h3 class="section-h">🏅 我的徽章（${earnedBadges.length}/${BADGES.length}）</h3>
-  <div class="badge-grid">` + BADGES.map(b=>{
-    const on = earnedBadges.includes(b.id);
-    return `<div class="badge ${on?'on':'locked'}">
-      <div class="badge-emoji">${b.emoji}</div>
-      <div class="badge-name">${esc(b.name)}</div>
-      <div class="badge-cond">${on?'已解锁 🎉':esc(b.cond)}</div>
-    </div>`;
-  }).join('') + `</div>`;
+  /* 按 g 分组渲染（保持 BADGES 里的先后顺序，不重排） */
+  const groups = [];
+  BADGES.forEach(b=>{
+    let g = groups.find(x=>x.t === (b.g || '🏅 其他'));
+    if(!g){ g = { t:(b.g || '🏅 其他'), items:[] }; groups.push(g); }
+    g.items.push(b);
+  });
+  const open = badgeWallOpen();
+  return `<h3 class="section-h badge-wall-h" id="badgeWallH">🏅 我的徽章（${earnedBadges.length}/${BADGES.length}）<span class="bw-toggle">${open?'收起 ▴':'展开 ▾'}</span></h3>
+  <div class="badge-wall${open?'':' collapsed'}">` +
+    groups.map(g=>{
+      const got = g.items.filter(b=>earnedBadges.includes(b.id)).length;
+      return `<div class="badge-group">
+      <div class="badge-group-t">${g.t}<span class="badge-group-n">${got}/${g.items.length}</span></div>
+      <div class="badge-grid">` + g.items.map(b=>{
+        const on = earnedBadges.includes(b.id);
+        return `<div class="badge ${on?'on':'locked'}">
+          <div class="badge-emoji">${b.emoji}</div>
+          <div class="badge-name">${esc(b.name)}</div>
+          <div class="badge-cond">${on?'已解锁 🎉':esc(b.cond)}</div>
+        </div>`;
+      }).join('') + `</div></div>`;
+    }).join('') + `</div>`;
+}
+/* 徽章墙折叠状态（默认展开；收起后记住选择，方便快速看到下面的奖励） */
+const BADGE_WALL_KEY = 'kidtask_badgewall_v1';
+function badgeWallOpen(){ try{ return localStorage.getItem(BADGE_WALL_KEY) !== '0'; }catch(e){ return true; } }
+function bindBadgeWall(){
+  const h = document.getElementById('badgeWallH'); if(!h) return;
+  h.onclick = ()=>{
+    const box = document.querySelector('.badge-wall'); if(!box) return;
+    const open = !box.classList.contains('collapsed');
+    const next = !open;
+    box.classList.toggle('collapsed', !next);
+    try{ localStorage.setItem(BADGE_WALL_KEY, next ? '1' : '0'); }catch(e){}
+    const tg = h.querySelector('.bw-toggle'); if(tg) tg.textContent = next ? '收起 ▴' : '展开 ▾';
+  };
 }
 
 
@@ -10871,12 +10932,13 @@ function renderRewards(){
     </div>
     <div class="bal-banner"><span class="gem">💎</span> 我的积分：<b>${bal}</b> 分</div>
     <p class="page-sub">${canManage ? '点「🎉 兑换」申请奖励，等家长批准后就能兑换啦！点「添加奖励」可以设置新奖励（需家长密码）。' : '点「🎉 兑换」申请奖励，等家长批准后就能兑换啦！想要新奖励的话，请让爸爸妈妈在家长端添加哦～'}</p>
+    ${badgeWallHtml()}
+    <h3 class="section-h">🎁 可以兑换的奖励</h3>
     <div class="rewards-grid">${rw}</div>
     <h3 class="section-h">⏳ 待审核申请（${pendings.length}）</h3>
     ${pendingHtml}
     <h3 class="section-h">📜 已兑换记录</h3>
-    <ul class="redeem-list">${history}</ul>
-    ${badgeWallHtml()}`;
+    <ul class="redeem-list">${history}</ul>`;
   main.querySelectorAll('.redeem-btn').forEach(b=>{
     if(b.classList.contains('off') || b.classList.contains('pending')) return;
     b.onclick = ()=> redeem(b.dataset.id);
@@ -10889,6 +10951,7 @@ function renderRewards(){
   });
   const add = main.querySelector('#addReward');
   if(add) add.onclick = ()=> requireParentPin('🔐 添加奖励验证', ()=> openRewardModal(), '添加奖励需要家长密码。');
+  bindBadgeWall();
 }
 /* ============ 奖励兑换浮层（点击导航「💝 奖励兑换」弹出，显示在导航栏下方） ============ */
 function syncNavActive(){ document.querySelectorAll('.nav-btn[data-page]').forEach(b=> b.classList.toggle('active', b.dataset.page===page)); }
