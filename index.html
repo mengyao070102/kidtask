@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609104" />
+<meta name="build-version" content="202609105" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -10285,6 +10285,20 @@ function openPinModal(title, opts){
   ov.querySelector('#pinOk').onclick = submit;
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
 }
+/* 家长敏感操作统一护栏：先验证家长密码，通过后才执行 onOk（奖励增删、清除数据等共用）。
+   注意：角色隔离只是「入口显隐」（孩子端看不到按钮），真正的护栏始终是密码。 */
+function isParentDevice(){ return deviceRole === 'parent'; }
+function requireParentPin(title, onOk, hint){
+  openPinModal(title || '🔐 家长验证', {
+    placeholder:'请输入家长密码', confirmText:'确定', hint: hint || '此操作需要家长密码。',
+    onSubmit:(v, errEl)=>{
+      if(!v){ errEl.textContent='请输入密码哦～'; errEl.style.display='block'; return false; }
+      if(v !== getPin()){ errEl.textContent='密码错误，只有家长可以操作哦～'; errEl.style.display='block'; return false; }
+      try { onOk(); } catch(e){}
+      return true;
+    }
+  });
+}
 /* 关闭所有挂在 body 上的浮层（PIN/确认/输入/Toast 等 .overlay），用于切导航时清理残留弹窗 */
 function unlockBody(){ if(!document.querySelector('body > .overlay')) document.body.classList.remove('modal-open'); }
 function closeAllOverlays(){ document.querySelectorAll('body > .overlay').forEach(o=> o.remove()); document.body.classList.remove('modal-open'); }
@@ -10822,6 +10836,7 @@ document.getElementById('fab').onclick = ()=> openModal();
 /* ============ 奖励兑换 ============ */
 function renderRewards(){
   const bal = pointBalance();
+  const canManage = isParentDevice();   // 仅家长端显示「添加奖励 / 删除奖励」入口（点击时仍需验证家长密码）
   const pendingIds = redeemed.filter(r=>r.status==='pending').map(r=>r.rewardId);
   const rw = rewardDefs.map(r=>{
     const can = bal >= r.cost;
@@ -10833,7 +10848,7 @@ function renderRewards(){
     else { btnHtml = '还差 '+lack+' 积分'; btnCls += ' off'; }
     return `
       <div class="reward ${can?'':'locked'} ${isPending?'is-pending':''}">
-        <button class="del-reward" data-del="${r.id}" title="删除这个奖励">✕</button>
+        ${canManage ? `<button class="del-reward" data-del="${r.id}" title="删除这个奖励">✕</button>` : ''}
         <div class="r-emoji">${esc(r.emoji||'🎁')}</div>
         <div class="r-name">${esc(r.name)}</div>
         <div class="r-cost">${r.cost} 积分</div>
@@ -10841,8 +10856,8 @@ function renderRewards(){
           ${btnHtml}
         </button>
       </div>`;
-  }).join('') + `
-      <div class="add-reward" id="addReward"><span class="plus">➕</span>添加奖励</div>`;
+  }).join('') + (canManage ? `
+      <div class="add-reward" id="addReward"><span class="plus">➕</span>添加奖励</div>` : '');
   const pendings = redeemed.filter(r=>r.status==='pending');
   const pendingHtml = pendings.length
     ? `<ul class="redeem-list">` + pendings.slice().reverse().map(r=>`<li class="pending-item">${esc(r.emoji)} ${esc(r.name)} <span class="r-his-cost">${r.cost} 积分 待审核</span> <button class="cancel-apply" data-rid="${r.id}" title="取消申请">取消</button></li>`).join('') + `</ul>`
@@ -10855,7 +10870,7 @@ function renderRewards(){
       <h1 class="page-title">💝 奖励兑换</h1>
     </div>
     <div class="bal-banner"><span class="gem">💎</span> 我的积分：<b>${bal}</b> 分</div>
-    <p class="page-sub">点「🎉 兑换」申请奖励，等家长批准后就能兑换啦！点「添加奖励」可以自己设置想要的奖励～</p>
+    <p class="page-sub">${canManage ? '点「🎉 兑换」申请奖励，等家长批准后就能兑换啦！点「添加奖励」可以设置新奖励（需家长密码）。' : '点「🎉 兑换」申请奖励，等家长批准后就能兑换啦！想要新奖励的话，请让爸爸妈妈在家长端添加哦～'}</p>
     <div class="rewards-grid">${rw}</div>
     <h3 class="section-h">⏳ 待审核申请（${pendings.length}）</h3>
     ${pendingHtml}
@@ -10873,7 +10888,7 @@ function renderRewards(){
     b.onclick = ()=> cancelApply(b.dataset.rid);
   });
   const add = main.querySelector('#addReward');
-  if(add) add.onclick = openRewardModal;
+  if(add) add.onclick = ()=> requireParentPin('🔐 添加奖励验证', ()=> openRewardModal(), '添加奖励需要家长密码。');
 }
 /* ============ 奖励兑换浮层（点击导航「💝 奖励兑换」弹出，显示在导航栏下方） ============ */
 function syncNavActive(){ document.querySelectorAll('.nav-btn[data-page]').forEach(b=> b.classList.toggle('active', b.dataset.page===page)); }
@@ -10941,11 +10956,13 @@ function closeRewardPop(){
   syncNavActive();
 }
 function delReward(id){
-  confirmModal({ message:'确定删除这个奖励吗？\n已兑换记录不受影响。', confirmText:'删除', danger:true, onConfirm:()=>{
-    rewardDefs = rewardDefs.filter(r=>r.id!==id);
-    saveRewardDefs();
-    render();
-  }});
+  requireParentPin('🔐 删除奖励验证', ()=>{
+    confirmModal({ message:'确定删除这个奖励吗？\n已兑换记录不受影响。', confirmText:'删除', danger:true, onConfirm:()=>{
+      rewardDefs = rewardDefs.filter(r=>r.id!==id);
+      saveRewardDefs();
+      render();
+    }});
+  }, '删除奖励需要家长密码。');
 }
 function openRewardModal(){
   const ov = document.createElement('div');
