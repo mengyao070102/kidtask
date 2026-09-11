@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="Pragma" content="no-cache" />
 <meta http-equiv="Expires" content="0" />
-<meta name="build-version" content="202609106" />
+<meta name="build-version" content="202609107" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -1090,6 +1090,28 @@
   .badge-wall.collapsed { display:none; }
   .badge-group-t { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:#7a3a5a; margin-bottom:2px; }
   .badge-group-n { font-size:12px; font-weight:700; color:#9a8a96; background:var(--accent-soft); border-radius:999px; padding:1px 8px; }
+  /* ===== 课程表 ===== */
+  .tt-today { background:linear-gradient(135deg,var(--accent-soft),#fff); border:2px solid var(--accent-soft); border-radius:14px; padding:10px 14px; font-size:14px; font-weight:700; color:#7a3a5a; margin:10px 0 12px; line-height:1.6; }
+  .tt-today .tt-none { color:#9a8a96; font-weight:600; }
+  .tt-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:4px; }
+  table.tt { border-collapse:separate; border-spacing:6px; width:100%; min-width:560px; }
+  table.tt th { font-size:13px; font-weight:800; color:#7a3a5a; }
+  .tt-day { background:var(--accent-soft); border-radius:10px; padding:6px 4px; }
+  .tt-day.now { background:var(--accent); color:#fff; }
+  .tt-period { width:96px; background:#fff; border:2px solid var(--accent-soft); border-radius:10px; padding:6px 4px; line-height:1.35; }
+  .tt-period b { display:block; font-size:13px; }
+  .tt-period span { display:block; font-size:11px; font-weight:600; color:#9a8a96; }
+  .tt-period.editable { cursor:pointer; }
+  .tt-period.editable:hover { border-color:var(--accent); }
+  .tt-cell { background:#fff; border:2px solid var(--accent-soft); border-radius:10px; padding:9px 4px; text-align:center; font-size:14px; font-weight:700; color:#5c3550; min-width:76px; }
+  .tt-cell.empty { border-style:dashed; color:#c3bcc6; font-weight:400; }
+  .tt-cell.editable { cursor:pointer; }
+  .tt-cell.editable:hover { border-color:var(--accent); background:#fffafc; }
+  .tt-cell.cur { background:linear-gradient(135deg,#fff3d6,#ffe6ef); border-color:var(--accent); box-shadow:0 2px 8px rgba(231,84,128,.18); }
+  tr.now-row .tt-period { border-color:var(--accent); }
+  .tt-ops { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 6px; }
+  .tt-ops .btn { font-size:13px; padding:7px 12px; }
+  .tt-tip { font-size:12px; color:#9a8a96; margin-top:4px; line-height:1.6; }
   .badge { background:#fff; border:2px solid var(--accent-soft); border-radius:14px; padding:14px 8px; text-align:center; transition:.15s; }
   .badge.locked { filter:grayscale(1); opacity:.5; }
   .badge-emoji { font-size:34px; }
@@ -2391,6 +2413,7 @@
       <button class="nav-btn active" data-page="home"><span class="emoji">🌸</span> 首页</button>
       <button class="nav-btn" data-page="school"><span class="emoji">🎀</span> 校内任务</button>
       <button class="nav-btn" data-page="outside"><span class="emoji">🏡</span> 家庭作业</button>
+      <button class="nav-btn" data-page="timetable"><span class="emoji">🗓️</span> 课程表</button>
       <button class="nav-btn" data-page="adventure"><span class="emoji">💡</span> 每日知识</button>
       <button class="nav-btn" data-page="learn"><span class="emoji">📖</span> 学习板块</button>
       <button class="nav-btn" data-page="games"><span class="emoji">🌟</span> 放松时间</button>
@@ -3317,6 +3340,7 @@ function render(){
     else if(page==='all') renderAll();
     else if(page==='adventure') renderAdventure();
     else if(page==='rewards') renderRewards();
+    else if(page==='timetable') renderTimetable();
     else if(page==='games') renderGames();
     else if(page==='learn'){ if(learnView==='quiz' && currentTest) renderQuiz(currentTest); else if(learnView==='calc') renderCalc(); else if(learnView==='english') renderEnglish(); else if(learnView==='poem') renderPoem(); else if(learnView==='ask') renderLearnAsk(); else renderLearn(); }
     else if(page==='parent') renderParent();
@@ -10895,6 +10919,164 @@ function openModal(editObj){
 document.getElementById('fab').onclick = ()=> openModal();
 
 /* ============ 奖励兑换 ============ */
+/* ============ 课程表（家长端可直接编辑 / 孩子端只读，跨设备同步） ============
+   数据：timetable = { periods:[{s,e}], grid:{ '1'..'7': [科目] }, showWeekend }
+   · periods 是全局节次时间（改一处，七天都生效），grid 每格是科目名字符串（空串=没课）
+   · 冲突收敛与其它家长配置一致：ttTs 时间戳较大者胜（最后编辑者赢）
+   · 权限：只有 deviceRole !== 'child' 才可编辑（用户选择：家长改、孩子只读，不再额外输密码） */
+const TT_KEY = 'kidtask_timetable_v1';
+const TT_TS_KEY = 'kidtask_ttts';
+const TT_DN = { 1:'周一', 2:'周二', 3:'周三', 4:'周四', 5:'周五', 6:'周六', 7:'周日' };
+function defaultPeriods(){
+  return [ {s:'08:20',e:'09:00'}, {s:'09:10',e:'09:50'}, {s:'10:00',e:'10:40'},
+           {s:'10:50',e:'11:30'}, {s:'14:00',e:'14:40'}, {s:'14:50',e:'15:30'} ];
+}
+function defaultGrid(){
+  return {
+    '1':['语文','数学','英语','体育','科学','自习'],
+    '2':['数学','语文','英语','音乐','写字','体育'],
+    '3':['语文','英语','数学','美术','科学','阅读'],
+    '4':['数学','语文','英语','体育','道法','自习'],
+    '5':['语文','数学','英语','音乐','体育','班会'],
+    '6':['','','','','',''],
+    '7':['','','','','','']
+  };
+}
+function normalizeTimetable(o){
+  try{
+    o = o || {};
+    const periods = (Array.isArray(o.periods) && o.periods.length)
+      ? o.periods.map(p=>({ s:String((p&&p.s)||''), e:String((p&&p.e)||'') }))
+      : defaultPeriods();
+    const src = (o.grid && typeof o.grid === 'object') ? o.grid : defaultGrid();
+    const grid = {};
+    for(let d=1; d<=7; d++){
+      const row = Array.isArray(src[String(d)]) ? src[String(d)] : [];
+      grid[String(d)] = periods.map((_, i)=> String(row[i] || '').slice(0, 10));
+    }
+    return { periods, grid, showWeekend: !!o.showWeekend };
+  }catch(e){ return { periods:defaultPeriods(), grid:defaultGrid(), showWeekend:false }; }
+}
+function loadTimetable(){ try{ return normalizeTimetable(JSON.parse(localStorage.getItem(TT_KEY))); }catch(e){ return normalizeTimetable(null); } }
+let timetable = loadTimetable();
+let ttTs = Number(localStorage.getItem(TT_TS_KEY)) || 0;
+function touchTimetableTs(){
+  ttTs = Math.max(ttTs + 1, Date.now());
+  try{ localStorage.setItem(TT_TS_KEY, String(ttTs)); }catch(e){}
+  try{ logicalTs = Math.max(logicalTs, ttTs); localStorage.setItem('kidtask_sync_ts', String(logicalTs)); }catch(e){}
+}
+function saveTimetable(){
+  timetable = normalizeTimetable(timetable);
+  try{ localStorage.setItem(TT_KEY, JSON.stringify(timetable)); }catch(e){}
+  touchTimetableTs();
+  try{ pushSync(); }catch(e){}
+}
+function setTTCell(d, i, v){
+  const row = (timetable.grid[String(d)] || []).slice();
+  while(row.length < timetable.periods.length) row.push('');
+  row[i] = String(v || '').slice(0, 10);
+  timetable.grid[String(d)] = row;
+  saveTimetable();
+}
+/* 把 "08:20" 加上 minutes 分钟，返回 HH:MM */
+function addMinutesHM(hm, mins){
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm||'')); if(!m) return '';
+  const t = (Number(m[1])*60 + Number(m[2]) + mins + 1440) % 1440;
+  return String(Math.floor(t/60)).padStart(2,'0') + ':' + String(t%60).padStart(2,'0');
+}
+function renderTimetable(){
+  const canEdit = deviceRole !== 'child';    // 孩子端只读：不渲染任何可点击/可编辑入口
+  const now = new Date();
+  const wd = now.getDay() === 0 ? 7 : now.getDay();
+  const hm = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  const days = timetable.showWeekend ? [1,2,3,4,5,6,7] : [1,2,3,4,5];
+  const todayRow = timetable.grid[String(wd)] || [];
+  const todayList = todayRow.filter(Boolean);
+
+  const rows = timetable.periods.map((p, i)=>{
+    const s = p.s || '', e = p.e || '';
+    const isCur = !!s && !!e && hm >= s && hm <= e;
+    return `<tr class="${isCur?'now-row':''}">
+      <th class="tt-period${canEdit?' editable':''}"${canEdit?` data-p="${i}" title="点击修改上课时间"`:''}><b>第 ${i+1} 节</b><span>${esc(s && e ? (s+' - '+e) : '未设置')}</span></th>
+      ${days.map(d=>{
+        const v = (timetable.grid[String(d)] || [])[i] || '';
+        const cur = isCur && d === wd;
+        return `<td class="tt-cell${v?'':' empty'}${cur?' cur':''}${canEdit?' editable':''}"${canEdit?` data-d="${d}" data-i="${i}" title="点击设置科目"`:''}>${v ? esc(v) : '—'}</td>`;
+      }).join('')}
+    </tr>`;
+  }).join('');
+
+  main.innerHTML = `
+    <div class="page-head"><h1 class="page-title">🗓️ 课程表</h1></div>
+    <div class="tt-today">今天 ${TT_DN[wd]} · ${todayList.length ? ('共 '+todayList.length+' 节课：'+todayList.map(v=>esc(v)).join(' / ')) : '<span class="tt-none">今天没有排课哦～</span>'}</div>
+    <div class="tt-wrap"><table class="tt">
+      <thead><tr><th class="tt-ph">节次</th>${days.map(d=>`<th class="tt-day${d===wd?' now':''}">${TT_DN[d]}</th>`).join('')}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    ${canEdit ? `
+    <div class="tt-ops">
+      <button class="btn primary" id="ttAddPeriod">➕ 加一节课</button>
+      <button class="btn" id="ttDelPeriod"${timetable.periods.length<=1?' disabled':''}>➖ 减一节课</button>
+      <button class="btn" id="ttToggleWeekend">${timetable.showWeekend?'隐藏周末':'显示周末'}</button>
+      <button class="btn" id="ttReset">恢复默认课表</button>
+    </div>
+    <div class="tt-tip">点格子可以改科目（留空就是没课），点左边「第 N 节」可以改上课时间。改完会自动同步到家里的其他设备。</div>`
+    : `<div class="tt-tip">这是爸爸妈妈排好的课表，想调整的话可以请爸爸妈妈帮忙哦～</div>`}`;
+
+  if(!canEdit) return;
+  main.querySelectorAll('.tt-cell.editable').forEach(td=>{
+    td.onclick = ()=>{
+      const d = td.dataset.d, i = Number(td.dataset.i);
+      promptModal({
+        title:`${TT_DN[d]} 第 ${i+1} 节`,
+        message:'输入科目名称，留空表示这节没课～',
+        defaultValue:(timetable.grid[String(d)] || [])[i] || '',
+        placeholder:'如：语文 / 体育 / 自习',
+        onConfirm:(v)=>{ setTTCell(d, i, String(v||'').trim()); render(); return true; }
+      });
+    };
+  });
+  main.querySelectorAll('.tt-period.editable').forEach(th=>{
+    th.onclick = ()=>{
+      const i = Number(th.dataset.p), p = timetable.periods[i] || {s:'',e:''};
+      promptModal({
+        title:`第 ${i+1} 节 上课时间`,
+        message:'按「开始-结束」填写，例如 08:20-09:00',
+        defaultValue:(p.s && p.e) ? (p.s+'-'+p.e) : '',
+        placeholder:'08:20-09:00',
+        onConfirm:(v)=>{
+          const m = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/.exec(String(v||'').trim());
+          if(!m){ try{ showToast('时间格式不对哦，请写成 08:20-09:00'); }catch(e){} return false; }
+          timetable.periods[i] = { s:m[1], e:m[2] };
+          saveTimetable(); render(); return true;
+        }
+      });
+    };
+  });
+  const addBtn = main.querySelector('#ttAddPeriod');
+  if(addBtn) addBtn.onclick = ()=>{
+    const last = timetable.periods[timetable.periods.length-1] || {s:'',e:''};
+    const ns = last.e ? last.e : '16:00';
+    timetable.periods.push({ s:ns, e:addMinutesHM(ns, 40) });
+    saveTimetable(); render();
+  };
+  const delBtn = main.querySelector('#ttDelPeriod');
+  if(delBtn) delBtn.onclick = ()=>{
+    if(timetable.periods.length <= 1) return;
+    confirmModal({ message:'确定删除第 '+timetable.periods.length+' 节吗？', confirmText:'删除', danger:true, onConfirm:()=>{
+      timetable.periods.pop(); saveTimetable(); render();
+    }});
+  };
+  const wkBtn = main.querySelector('#ttToggleWeekend');
+  if(wkBtn) wkBtn.onclick = ()=>{ timetable.showWeekend = !timetable.showWeekend; saveTimetable(); render(); };
+  const rsBtn = main.querySelector('#ttReset');
+  if(rsBtn) rsBtn.onclick = ()=>{
+    confirmModal({ message:'恢复成默认课表？自己排的课会被覆盖哦。', confirmText:'恢复', danger:true, onConfirm:()=>{
+      timetable = normalizeTimetable(null); saveTimetable(); render();
+    }});
+  };
+}
+
 function renderRewards(){
   const bal = pointBalance();
   const canManage = isParentDevice();   // 仅家长端显示「添加奖励 / 删除奖励」入口（点击时仍需验证家长密码）
@@ -11810,6 +11992,8 @@ function collectSyncState(){
     /* 打卡只同步孩子端的记录：家长端快照不带 checkin，避免家长端打卡覆盖孩子的连续记录 */
     checkin: deviceRole === 'child' ? checkin : undefined,
     earnedBadges,
+    /* 课程表（家长排课）：与其它家长配置一样按 ts 取较新收敛 */
+    timetable, ttTs,
     knowledgeType,
     redeemed,
     /* 历史 / 累积数据（多端合并，不互相覆盖）：
@@ -11985,6 +12169,15 @@ function applySyncState(obj){
     if(obj.grade != null){ const _gt = Number(obj.gTs)||0; if((_gt===0 && gradeTs===0) || _gt > gradeTs){ grade = obj.grade; if(_gt>gradeTs) gradeTs = _gt; try { localStorage.setItem(GKEY, grade); } catch(e){} } }
     if(obj.semester != null){ const _st = Number(obj.sTs)||0; if((_st===0 && semTs===0) || _st > semTs){ semester = obj.semester; if(_st>semTs) semTs = _st; try { localStorage.setItem(SKEY, semester); } catch(e){} } }
     if(obj.pin != null){ const _pt = Number(obj.pTs)||0; if((_pt===0 && pinTs===0) || _pt > pinTs){ try { setPin(String(obj.pin)); } catch(e){} if(_pt>pinTs) pinTs = _pt; } } // 家长密码按 ts 取较新，各端保持一致
+    if(obj.timetable && typeof obj.timetable === 'object'){   // 课程表：按 ttTs 取较新，最后编辑者胜
+      const _tt = Number(obj.ttTs)||0;
+      if((_tt===0 && ttTs===0) || _tt > ttTs){
+        timetable = normalizeTimetable(obj.timetable);
+        try { localStorage.setItem(TT_KEY, JSON.stringify(timetable)); }catch(e){}
+        if(_tt > ttTs){ ttTs = _tt; try{ localStorage.setItem(TT_TS_KEY, String(ttTs)); }catch(e){} }
+        if(page === 'timetable'){ try{ renderTimetable(); }catch(e){} }
+      }
+    }
     /* 注：gomoku / rps / dice / diceCfg 等小游戏按用户要求纯本地、不同步，不再应用远端 */
     if(Array.isArray(obj.starLog)){ // 星星使用明细（含摇骰子 −1⭐ 记录）：按 ts 合并去重，避免三端各玩各的互相覆盖
       const seen = new Set(starLog.map(e=>String(e&&e.ts)));
