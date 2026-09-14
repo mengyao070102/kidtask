@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609111" />
+<meta name="build-version" content="202609112" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -6007,6 +6007,11 @@ function renderGames(){
     </div>`;
   main.querySelectorAll('.game-card').forEach(c=>{
     c.onclick = ()=>{
+      /* 摇骰子是孩子的奖励游戏（消耗共享星星），家长端不允许进入玩耍，避免误扣孩子的星星 */
+      if(deviceRole==='parent' && c.dataset.g==='dice'){
+        showToast('🌈 摇骰子是孩子的奖励游戏，请在孩子端玩耍，家长端不会消耗星星哦～');
+        return;
+      }
       const inWin = relaxInWindow();
       if(relaxCfg.enabled){
         if(inWin===false){ showToast('⏰ 现在不是放松时间哦，'+relaxCfg.start+'–'+relaxCfg.end+' 才能玩～'); return; }
@@ -6412,6 +6417,8 @@ function renderDice(){
 }
 function shuffleArr(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=arr[i]; arr[i]=arr[j]; arr[j]=t; } }
 function rollDice(){
+  /* 家长端不可摇骰子（不消耗孩子的星星），双保险 */
+  if(deviceRole==='parent'){ showToast('🌈 摇骰子是孩子的奖励游戏，请在孩子端玩耍哦～'); return; }
   const stars = starCount();
   if(stars <= 0){ showToast('⭐ 星星不够啦，去完成「我的任务」赚星星，就能继续摇！'); return; }
   if(!dice.current || dice.current.length!==6){ dice.current = genDiceRound(dice.round); }
