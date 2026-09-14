@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609113" />
+<meta name="build-version" content="202609119" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -952,7 +952,7 @@
   .girl-main { display:grid; grid-template-columns:320px 1fr; gap:16px; align-items:start; }
   .girl-left { background:#fff; border:2px solid var(--accent-soft); border-radius:22px; padding:14px; position:sticky; top:12px; text-align:center; }
   .girl-cap { font-size:14px; font-weight:800; color:var(--accent); margin:2px 0 8px; }
-  .girl-fig { width:100%; max-width:300px; margin:0 auto; background:#fff3f8; border-radius:18px; padding:10px; }
+  .girl-fig { width:100%; max-width:300px; margin:0 auto; background:linear-gradient(180deg,#fffafc 0%,#fff0f7 55%,#ffe6f1 100%); border:2px solid #ffd3e5; border-radius:20px; padding:10px; box-shadow:0 4px 14px rgba(255,158,196,.18); }
   .girl-doll { width:100%; height:auto; display:block; }
   .girl-thumb { width:100%; height:150px; display:block; border-radius:12px; background:#fff5fa; overflow:hidden; }
   .girl-thumb svg { width:100%; height:100%; display:block; }
@@ -2228,12 +2228,16 @@
     font-size:16px; font-weight:800; line-height:1.3; word-break:break-word;
     display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
   }
-  .task-block .tb-badge {
-    position:absolute; top:7px; right:9px; width:22px; height:22px; border-radius:50%;
-    background:rgba(255,255,255,.92); color:#2fae5e; font-size:14px; font-weight:900;
-    display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.18);
+  .task-block .tb-flag {
+    position:absolute; top:-7px; left:-7px; width:23px; height:23px; border-radius:50%;
+    font-size:14px; font-weight:900; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 5px rgba(0,0,0,.22); z-index:2;
+    border:2px solid #fff;
   }
-  .task-block .tb-badge.canc { color:#b94a4a; }
+  .task-block .tb-flag.todo { background:#ff5d7e; color:#fff; font-size:15px; padding-bottom:1px; }
+  .task-block .tb-flag.ok { background:#ffffff; font-size:14px; }
+  .task-block .tb-flag.canc { background:#efefef; color:#b94a4a; }
   .task-block:active { transform:scale(.96); box-shadow:0 2px 6px rgba(180,120,160,.3); }
   .task-block.done { filter:saturate(.85); }
   .task-block.done .tb-name { text-decoration:none; opacity:.92; }
@@ -3412,7 +3416,10 @@ function taskBlock(t, date, confirmMode, simple){
     else if(t.doneDate){ const dd=new Date(String(t.doneDate).replace(/-/g,'/')); doneTimeHtml = `<span class="tb-done-time">🕐 ${dd.getFullYear()}年${p(dd.getMonth()+1)}月${p(dd.getDate())}日</span>`; }
   }
   if(doneTimeHtml) b.classList.add('has-time');
-  b.innerHTML = `<span class="tb-name">${esc(t.title)}</span>` + metaHtml + timerHtml + doneTimeHtml + (isDone ? `<span class="tb-badge">✓</span>` : (isCancelled ? `<span class="tb-badge canc">✕</span>` : ''));
+  // 左上角状态角标：未完成=红色叹号❗、已完成=对勾圆圈☑️、已取消=灰✕
+  const flagCls = isDone?'ok':(isCancelled?'canc':'todo');
+  const flagTxt = isDone?'☑️':(isCancelled?'✕':'!');
+  b.innerHTML = `<span class="tb-flag ${flagCls}">${flagTxt}</span><span class="tb-name">${esc(t.title)}</span>` + metaHtml + timerHtml + doneTimeHtml;
   if(!isCancelled){
     const tb = b.querySelector('[data-timerbtn]');
     if(tb) tb.onclick = (e)=>{ e.stopPropagation(); toggleTaskTimer(t); };
@@ -7983,305 +7990,360 @@ function gdQuizHtml(){
   </div>`;
 }
 function gdThumb(p){ return gdPartSvg(gdTab, p.id); }
-/* ===== 纯 SVG 娃娃绘制：所有部件同一坐标系，组装必然严丝合缝 ===== */
-const SKIN='#ffe2cb', SKIN_D='#f4caac';
+/* ===== 纯 SVG 娃娃绘制 v2（精致可爱版）：所有部件同一坐标系，组装必然严丝合缝 ===== */
+const SKIN='#ffe6d2', SKIN_D='#f6c9ab', SKIN_D2='#e9ab84';
 const HCX=130, HCY=116, HRX=58, HRY=64;
 const FIGW=260, FIGH=480;
 // 共享躯干轮廓：baseTorso 与 drawClothes 共用，保证衣服与身体严丝合缝
-const BODY='M90,188 C82,232 92,300 100,310 L160,310 C168,300 178,232 170,188 C158,178 146,176 130,176 C114,176 102,178 90,188 Z';
+const BODY='M92,189 C83,226 87,278 98,309 L162,309 C173,278 177,226 168,189 C156,179 146,176 130,176 C114,176 104,179 92,189 Z';
 
 function P(vb, inner, cls){ return `<svg viewBox="${vb}" class="${cls||''}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`; }
 
 function baseHead(){
   return `<g>
-    <!-- 脖子 -->
-    <path d="M113,166 Q130,176 147,166 L150,198 Q130,206 110,198 Z" fill="${SKIN_D}"/>
-    <path d="M113,166 Q130,176 147,166 L148,182 Q130,190 112,182 Z" fill="${SKIN}" opacity=".9"/>
-    <!-- 耳朵（贴在脸侧，供耳饰佩戴） -->
-    <ellipse cx="72" cy="120" rx="9" ry="13" fill="${SKIN}"/>
-    <ellipse cx="188" cy="120" rx="9" ry="13" fill="${SKIN}"/>
-    <ellipse cx="72" cy="122" rx="4" ry="7" fill="${SKIN_D}" opacity=".55"/>
-    <ellipse cx="188" cy="122" rx="4" ry="7" fill="${SKIN_D}" opacity=".55"/>
-    <!-- 脸（柔和蛋形） -->
-    <ellipse cx="${HCX}" cy="${HCY}" rx="${HRX}" ry="${HRY}" fill="${SKIN}"/>
-    <ellipse cx="${HCX}" cy="${HCY+12}" rx="${HRX-8}" ry="${HRY-12}" fill="${SKIN_D}" opacity=".18"/>
+    <!-- 脖子（双层：阴影+肤色，自然连接头与身体） -->
+    <path d="M114,164 Q130,176 146,164 L150,200 Q130,209 110,200 Z" fill="${SKIN_D}"/>
+    <path d="M114,164 Q130,176 146,164 L149,184 Q130,192 111,184 Z" fill="${SKIN}" opacity=".92"/>
+    <!-- 耳朵 -->
+    <ellipse cx="71" cy="122" rx="9.5" ry="13" fill="${SKIN}"/>
+    <ellipse cx="189" cy="122" rx="9.5" ry="13" fill="${SKIN}"/>
+    <ellipse cx="71" cy="124" rx="4.2" ry="7" fill="${SKIN_D2}" opacity=".45"/>
+    <ellipse cx="189" cy="124" rx="4.2" ry="7" fill="${SKIN_D2}" opacity=".45"/>
+    <!-- 脸（蛋形，下巴微收更软萌） -->
+    <path d="M130,51 C96,51 71,81 72,117 C73,150 99,180 130,180 C161,180 187,150 188,117 C189,81 164,51 130,51 Z" fill="${SKIN}"/>
+    <!-- 面部柔和立体：下颊红晕底 + 额头反光 -->
+    <ellipse cx="130" cy="152" rx="40" ry="20" fill="${SKIN_D}" opacity=".14"/>
+    <path d="M96,88 Q112,74 132,72" stroke="#fff" stroke-width="4.5" opacity=".25" fill="none" stroke-linecap="round"/>
   </g>`;
 }
 function baseTorso(){
-  // 手臂(含手)已移除：当前娃娃造型不含手臂/手（用户要求去掉）
   let s='';
-  // 身体（带圆柱明暗，制造立体感）
   s+=`<path d="${BODY}" fill="${SKIN}"/>`;
-  s+=`<path d="M150,190 C164,234 160,296 150,310 C162,296 168,234 158,190 Z" fill="${SKIN_D}" opacity=".3"/>`;
-  s+=`<path d="M110,196 C104,240 110,296 118,308 L128,308 C120,296 116,240 122,196 Z" fill="#fff" opacity=".16"/>`;
-  s+=`<path d="M101,264 Q130,274 159,264" stroke="${SKIN_D}" stroke-width="2" opacity=".2" fill="none"/>`;
+  // 右侧暗面 + 左侧亮面 → 圆柱立体感
+  s+=`<path d="M150,192 C164,228 168,276 158,309 L162,309 C173,278 177,226 168,189 C162,184 156,181 150,192 Z" fill="${SKIN_D}" opacity=".38"/>`;
+  s+=`<path d="M108,194 C100,226 102,278 110,306 L118,306 C112,278 112,228 118,196 Z" fill="#fff" opacity=".2"/>`;
+  // 锁骨与腰线的柔软曲线
+  s+=`<path d="M112,192 Q130,200 148,192" stroke="${SKIN_D2}" stroke-width="1.15" opacity=".28" fill="none" stroke-linecap="round"/>`;
+  s+=`<path d="M103,262 Q130,272 157,262" stroke="${SKIN_D}" stroke-width="1.15" opacity=".22" fill="none" stroke-linecap="round"/>`;
   return s;
 }
+// 小手（皮肤色）：画在头发之后、衣服之前——手臂垂在披发前面，短袖露半只手、长袖只露指尖
+function drawHands(){
+  return `<circle cx="84" cy="261" r="8.2" fill="${SKIN}"/><circle cx="176" cy="261" r="8.2" fill="${SKIN}"/>`
+    +`<ellipse cx="81.5" cy="259" rx="2.4" ry="1.6" fill="#fff" opacity=".3"/><ellipse cx="178.5" cy="259" rx="2.4" ry="1.6" fill="#fff" opacity=".3"/>`;
+}
 function baseLegs(){
-  // 两条腿从胯部相连，往下明显分开；中间留清晰腿缝，不再连成一块
   return `<g>
-    <!-- 腿缝填充：深肤色+深中线，明确两条腿之间的分界 -->
-    <path d="M122,306 L138,306 L141,424 Q130,432 119,424 Z" fill="#e3b898" opacity=".75"/>
-    <path d="M130,308 C129,346 130,388 130,424" stroke="#c79a7a" stroke-width="3" opacity=".7" fill="none" stroke-linecap="round"/>
-    <!-- 左腿 -->
-    <path d="M104,304 L101,426 Q101,444 116,444 L121,444 Q124,432 122,424 L122,306 Z" fill="${SKIN}"/>
+    <!-- 腿缝：中间柔和小缝，两条腿圆乎乎分开 -->
+    <path d="M124,306 L136,306 L139,422 Q130,430 121,422 Z" fill="${SKIN_D2}" opacity=".38"/>
+    <path d="M130,310 C129,348 130,386 130,420" stroke="${SKIN_D2}" stroke-width="1.9" opacity=".4" fill="none" stroke-linecap="round"/>
+    <!-- 左腿（胖乎乎藕节腿：大腿→膝→小腿圆润曲线） -->
+    <path d="M103,306 C98,342 96,384 100,421 C100,436 107,444 115,444 C123,444 126,434 123,422 L122,306 Z" fill="${SKIN}"/>
     <!-- 右腿 -->
-    <path d="M156,304 L159,426 Q159,444 144,444 L139,444 Q136,432 138,424 L138,306 Z" fill="${SKIN}"/>
-    <path d="M108,314 L106,424" stroke="#fff" stroke-width="3" opacity=".2" fill="none" stroke-linecap="round"/>
-    <path d="M152,314 L154,424" stroke="${SKIN_D}" stroke-width="3" opacity=".3" fill="none" stroke-linecap="round"/>
+    <path d="M157,306 C162,342 164,384 160,421 C160,436 153,444 145,444 C137,444 134,434 137,422 L138,306 Z" fill="${SKIN}"/>
+    <!-- 膝盖柔光与腿部明暗 -->
+    <ellipse cx="111" cy="372" rx="8.5" ry="11" fill="#fff" opacity=".2"/>
+    <ellipse cx="149" cy="372" rx="8.5" ry="11" fill="#fff" opacity=".16"/>
+    <path d="M106,316 L103,418" stroke="#fff" stroke-width="1.9" opacity=".28" fill="none" stroke-linecap="round"/>
+    <path d="M154,316 L157,418" stroke="${SKIN_D}" stroke-width="2.2" opacity=".28" fill="none" stroke-linecap="round"/>
   </g>`;
 }
 function hairColor(id){ return ({h1:'#f6b9d4',h2:'#f3d28f',h3:'#f6b9d4',h4:'#eec98c',h5:'#7a4a2c',h6:'#5e3f2e',h7:'#caa37a',h8:'#eab98f',h9:'#ff5a6e',h10:'#b3405a',h11:'#e8d3a8',h12:'#9fb8d6'})[id]||'#f6b9d4'; }
 function hairColorDark(id){ return ({h1:'#e89bbd',h2:'#d9b46f',h3:'#e89bbd',h4:'#d9b469',h5:'#5e3720',h6:'#43291c',h7:'#b08860',h8:'#d9a06f',h9:'#d63a4e',h10:'#8a2f45',h11:'#cdb685',h12:'#7a98ba'})[id]||'#e89bbd'; }
-function bow(x,y,c){ return `<path d="M${x},${y} q-11,-7 -15,3 l12,4 Z" fill="${c}"/><path d="M${x},${y} q11,-7 15,3 l-12,4 Z" fill="${c}"/><circle cx="${x}" cy="${y+2}" r="3.4" fill="${c}"/>`; }
+function bow(x,y,c,sc){ sc=sc||1; return `<g transform="translate(${x},${y}) scale(${sc})"><path d="M0,0 Q-12,-8 -17,3 L-2,6 Z" fill="${c}"/><path d="M0,0 Q12,-8 17,3 L2,6 Z" fill="${c}"/><path d="M-17,3 Q-20,10 -13,12 Q-8,12 -2,6 Z" fill="${c}" opacity=".85"/><path d="M17,3 Q20,10 13,12 Q8,12 2,6 Z" fill="${c}" opacity=".85"/><circle cx="0" cy="3" r="3.6" fill="${c}"/><circle cx="-1.2" cy="1.6" r="1.2" fill="#fff" opacity=".7"/></g>`; }
+function hairShine(cx,cy,w){ return `<path d="M${cx-w/2},${cy} Q${cx},${cy-w*0.32} ${cx+w/2},${cy}" stroke="#fff" stroke-width="5.5" opacity=".3" fill="none" stroke-linecap="round"/>`; }
 function braid(x0,y0,x1,y1,c,d){
-  let s = `<path d="M${x0-9},${y0} C${x0-15},${y0+55} ${x1-13},${y1-40} ${x1},${y1} C${x1+11},${y1-40} ${x0+15},${y0+55} ${x0+9},${y0} Z" fill="${d}"/>`;
-  for(let i=1;i<=3;i++){ const t=i/4, cx=x0+(x1-x0)*t, cy=y0+(y1-y0)*t; s += `<path d="M${cx-9},${cy-7} Q${cx},${cy+5} ${cx+9},${cy-7}" stroke="${c}" stroke-width="3" fill="none" opacity=".75"/>`; }
+  let s=`<path d="M${x0-10},${y0} C${x0-16},${y0+40} ${x1-14},${y1-30} ${x1},${y1+6} C${x1+12},${y1-30} ${x0+16},${y0+40} ${x0+10},${y0} Z" fill="${d}"/>`;
+  s+=`<path d="M${x0-7},${y0+2} C${x0-12},${y0+38} ${x1-11},${y1-26} ${x1},${y1+2} C${x1+10},${y1-26} ${x0+12},${y0+38} ${x0+7},${y0+2} Z" fill="${c}"/>`;
+  for(let i=1;i<=4;i++){ const t=i/5, cx=x0+(x1-x0)*t, cy=y0+(y1+6-y0)*t; s+=`<path d="M${cx-8},${cy-6} Q${cx},${cy+5} ${cx+8},${cy-6}" stroke="${d}" stroke-width="1.9" fill="none" opacity=".5"/>`; }
   return s;
 }
 function hairBack(id){
   const c = hairColor(id), d = hairColorDark(id);
-  // 长发：公主长发 / 蓬松卷发 —— 脑后大弧度 + 两侧垂落肩下
+  // 长发系：脑后大弧 + 两侧垂腰长发（外深内浅，发尾内扣）
   if(id==='h1'||id==='h8'||id==='h9'||id==='h11'){
-    const curl = id==='h8'||id==='h9';
-    // 头顶后脑勺发包 + 左右两条长发垂在背后(齐腰)，中间留出身体
-    let s = `<path d="M130,40 C84,40 62,74 60,112 C58,152 68,174 84,180 C100,186 120,178 130,166 C140,178 160,186 176,180 C192,174 202,152 200,112 C198,74 176,40 130,40 Z" fill="${d}"/>`;
-    s += `<path d="M130,50 C90,50 74,82 74,114 C74,146 82,162 96,166 C110,170 124,162 130,152 C136,162 150,170 164,166 C178,162 186,146 186,114 C186,82 170,50 130,50 Z" fill="${c}"/>`;
-    s += `<path d="M78,140 C66,180 64,222 76,262 C82,274 98,268 102,248 C94,222 96,200 100,150 C98,160 88,156 78,140 Z" fill="${d}"/>`;
-    s += `<path d="M86,150 C78,200 78,222 86,252 C90,262 100,258 102,248 C96,222 98,210 102,160 C100,168 92,164 86,150 Z" fill="${c}"/>`;
-    s += `<path d="M182,140 C194,180 196,222 184,262 C178,274 162,268 158,248 C166,222 164,200 160,150 C162,160 172,156 182,140 Z" fill="${d}"/>`;
-    s += `<path d="M174,150 C182,200 182,222 174,252 C170,262 160,258 158,248 C164,222 162,210 158,160 C160,168 168,164 174,150 Z" fill="${c}"/>`;
-    if(curl){
-      s += `<path d="M72,228 q-16,16 -6,34 q12,12 22,-4 q-8,-10 -22,-4 q6,-14 6,-26 Z" fill="${c}"/>`;
-      s += `<path d="M188,228 q16,16 6,34 q-12,12 -22,-4 q8,-10 22,-4 q-6,-14 -6,-26 Z" fill="${c}"/>`;
+    let s = `<path d="M130,38 C82,38 58,76 58,118 C58,152 68,176 84,186 C98,194 118,188 130,176 C142,188 162,194 176,186 C192,176 202,152 202,118 C202,76 178,38 130,38 Z" fill="${d}"/>`;
+    s += `<path d="M130,48 C90,48 70,82 70,118 C70,148 78,166 92,172 C106,178 122,170 130,158 C138,170 154,178 168,172 C182,166 190,148 190,118 C190,82 170,48 130,48 Z" fill="${c}"/>`;
+    s += `<path d="M80,152 C64,194 62,240 74,272 C80,288 97,284 98,266 C92,232 96,198 106,164 Z" fill="${d}"/>`;
+    s += `<path d="M88,158 C78,198 78,236 86,262 C90,274 100,270 99,256 C94,228 97,198 104,168 Z" fill="${c}"/>`;
+    s += `<path d="M180,152 C196,194 198,240 186,272 C180,288 163,284 162,266 C168,232 164,198 154,164 Z" fill="${d}"/>`;
+    s += `<path d="M172,158 C182,198 182,236 174,262 C170,274 160,270 161,256 C166,228 163,198 156,168 Z" fill="${c}"/>`;
+    if(id==='h8'||id==='h9'){
+      s += `<path d="M72,254 q-16,10 -10,28 q10,13 26,3 q-11,-9 -16,-31 Z" fill="${c}"/>`;
+      s += `<path d="M188,254 q16,10 10,28 q-10,13 -26,3 q11,-9 16,-31 Z" fill="${c}"/>`;
     }
     return s;
   }
-  if(id==='h2'){ // 双马尾：脑后发包 + 两条马尾垂在身后两侧(齐腰)
+  if(id==='h2'){ // 双马尾：脑后发包 + 两条高马尾垂在身后（外深内浅，发梢微翘）
+    let s = `<ellipse cx="130" cy="106" rx="65" ry="72" fill="${d}"/>`;
+    s += `<ellipse cx="130" cy="110" rx="57" ry="64" fill="${c}"/>`;
+    s += `<path d="M70,120 C40,146 34,200 50,262 C56,284 74,280 76,260 C68,206 76,164 88,132 Z" fill="${d}"/>`;
+    s += `<path d="M76,126 C52,150 48,198 60,252 C64,268 76,264 76,250 C70,204 78,168 88,140 Z" fill="${c}"/>`;
+    s += `<path d="M190,120 C220,146 226,200 210,262 C204,284 186,280 184,260 C192,206 184,164 172,132 Z" fill="${d}"/>`;
+    s += `<path d="M184,126 C208,150 212,198 200,252 C196,268 184,264 184,250 C190,204 182,168 172,140 Z" fill="${c}"/>`;
+    return s;
+  }
+  if(id==='h5'||id==='h12'){ // 波波头 / 雾霾蓝短发：及肩内扣轮廓
+    let s = `<path d="M130,42 C80,42 56,88 56,146 C56,192 62,220 74,240 C86,254 104,250 112,238 C120,228 124,212 130,208 C136,212 140,228 148,238 C156,250 174,254 186,240 C198,220 204,192 204,146 C204,88 180,42 130,42 Z" fill="${d}"/>`;
+    s += `<path d="M130,52 C86,52 68,94 68,148 C68,188 74,212 84,228 C92,238 106,234 112,224 C118,216 122,204 130,200 C138,204 142,216 148,224 C154,234 168,238 176,228 C186,212 192,188 192,148 C192,94 174,52 130,52 Z" fill="${c}"/>`;
+    return s;
+  }
+  if(id==='h6'){ // 侧马尾：右侧身后一束蓬松大马尾
     let s = `<ellipse cx="130" cy="106" rx="64" ry="70" fill="${d}"/>`;
-    s += `<ellipse cx="130" cy="110" rx="57" ry="63" fill="${c}"/>`;
-    s += `<path d="M72,118 C42,148 38,200 54,262 C62,288 80,282 82,258 C72,200 80,160 88,128 Z" fill="${d}"/>`;
-    s += `<path d="M188,118 C218,148 222,200 206,262 C198,288 180,282 178,258 C188,200 180,160 172,128 Z" fill="${d}"/>`;
+    s += `<ellipse cx="130" cy="110" rx="56" ry="62" fill="${c}"/>`;
+    s += `<path d="M172,120 C210,140 224,196 212,258 C207,280 189,276 188,256 C196,208 186,164 164,136 Z" fill="${d}"/>`;
+    s += `<path d="M176,126 C206,146 216,196 206,250 C202,266 190,262 190,248 C196,206 188,170 168,142 Z" fill="${c}"/>`;
     return s;
   }
-  if(id==='h5'||id==='h12'){ // 波波头（及肩内扣）/ 雾霾蓝短发
-    let s = `<path d="M130,44 C78,44 56,90 56,150 C56,196 62,222 72,240 C82,252 100,248 110,238 C118,230 122,212 130,208 C138,212 142,230 150,238 C160,248 178,252 188,240 C198,222 204,196 204,150 C204,90 182,44 130,44 Z" fill="${d}"/>`;
-    s += `<path d="M130,54 C84,54 68,94 68,150 C68,190 74,214 82,230 C90,240 104,236 112,228 C118,222 122,208 130,204 C138,208 142,222 148,228 C156,236 170,240 178,230 C186,214 192,190 192,150 C192,94 176,54 130,54 Z" fill="${c}"/>`;
-    return s;
-  }
-  if(id==='h6'){ // 侧马尾（尾巴在 front 画于右侧）
-    let s = `<ellipse cx="130" cy="108" rx="62" ry="68" fill="${d}"/>`;
-    s += `<ellipse cx="130" cy="112" rx="55" ry="61" fill="${c}"/>`;
-    return s;
-  }
-  // 丸子头 h3 / 麻花辫 h4 / 短碎发 h7 及默认：脑后圆润发包
-  let s = `<ellipse cx="130" cy="108" rx="62" ry="68" fill="${d}"/>`;
-  s += `<ellipse cx="130" cy="112" rx="55" ry="61" fill="${c}"/>`;
+  // 丸子头 h3/h10 / 麻花辫 h4 / 短碎发 h7 及默认：脑后圆润发包
+  let s = `<ellipse cx="130" cy="106" rx="64" ry="71" fill="${d}"/>`;
+  s += `<ellipse cx="130" cy="110" rx="56" ry="63" fill="${c}"/>`;
   return s;
 }
-function hairFront(id){
+function hairFront(id, noAhoge){
   const c = hairColor(id), d = hairColorDark(id);
   const hi = (p,o)=>`<path d="${p}" fill="#fff" opacity="${o||.35}"/>`;
   let s = '';
-  if(id==='h1'||id==='h8'||id==='h9'||id==='h11'){ // 公主长发/蓬松卷发/红色卷发/亚麻长发：无中分齐整刘海(去发缝)，鬓角仅下巴以下
-    s += `<path d="M72,108 C72,64 100,46 130,46 C160,46 188,64 188,108 C184,113 173,115 161,115 C150,119 140,118 130,116 C120,118 110,119 99,115 C87,115 76,113 72,108 Z" fill="${c}"/>`;
-    s += `<path d="M78,158 C72,172 72,196 78,210 C82,218 90,214 88,204 C84,190 86,172 90,162 Z" fill="${c}"/>`;
-    s += `<path d="M182,158 C188,172 188,196 182,210 C178,218 170,214 172,204 C176,190 174,172 170,162 Z" fill="${c}"/>`;
+  // 呆毛：从发顶翘起的一根小卷（画在刘海后；戴帽子时隐藏避免从帽子里戳出来）
+  if(!noAhoge){
+    s += `<path d="M132,52 C130,42 121,36 126,24 C128,33 136,38 136,50 Z" fill="${d}"/>`;
+    s += `<path d="M130.5,47 C129.5,42 126,37 127,31" stroke="${c}" stroke-width="1.15" fill="none" stroke-linecap="round" opacity=".75"/>`;
+  }
+  if(id==='h1'||id==='h8'||id==='h9'||id==='h11'){ // 长发系：圆弧碎波刘海 + 鬓角发束，不遮眼
+    s += `<path d="M72,104 C72,62 98,46 130,46 C162,46 188,62 188,104 C185,109 177,110 171,105 C165,112 155,114 148,107 C142,113 134,114 130,108 C126,114 118,113 112,107 C105,114 95,112 89,105 C83,110 75,109 72,104 Z" fill="${c}"/>`;
+    s += `<path d="M75,98 C65,120 62,152 68,180 C71,192 82,192 84,180 C80,154 84,124 90,102 Z" fill="${c}"/>`;
+    s += `<path d="M185,98 C195,120 198,152 192,180 C189,192 178,192 176,180 C180,154 176,124 170,102 Z" fill="${c}"/>`;
+    s += hi('M84,72 Q100,56 124,53 Q104,66 90,84 Z',.4);
+    if(id==='h1') s += `<path d="M104,50 L110,36 L120,48 L130,32 L140,48 L150,36 L156,50 Z" fill="#ffd95e" stroke="#e6b800" stroke-width="1.15"/><circle cx="130" cy="38" r="3.2" fill="#ff6b9d"/><circle cx="113" cy="45" r="1.8" fill="#8fd0ff"/><circle cx="147" cy="45" r="1.8" fill="#8fd0ff"/>`;
+  }
+  else if(id==='h2'){ // 双马尾：碎波刘海 + 鬓角小束 + 大蝴蝶结
+    s += `<path d="M74,104 C74,66 100,52 130,52 C160,52 186,66 186,104 C184,109 176,110 170,105 C164,112 154,114 147,107 C141,113 133,114 130,108 C126,114 118,113 112,107 C105,114 95,112 89,105 C83,110 76,109 74,104 Z" fill="${c}"/>`;
+    s += `<path d="M74,112 C58,118 50,140 56,160 C60,172 70,168 70,156 C66,144 70,126 80,120 Z" fill="${c}"/>`;
+    s += `<path d="M186,112 C202,118 210,140 204,160 C200,172 190,168 190,156 C194,144 190,126 180,120 Z" fill="${c}"/>`;
+    s += bow(70,122,'#ff8fb0',1.15) + bow(190,122,'#ff8fb0',1.15);
+    s += hi('M84,72 Q100,58 122,55 Q104,68 90,86 Z',.4);
+  }
+  else if(id==='h3'||id==='h10'){ // 丸子头/酒红双丸子：碎波刘海 + 高双丸子（带柔光与缎带）
+    s += `<path d="M76,104 C76,72 102,54 130,54 C158,54 184,72 184,104 C182,109 174,110 168,105 C162,112 152,114 146,107 C140,113 132,114 130,108 C126,114 118,113 112,107 C105,114 95,112 89,105 C83,110 78,109 76,104 Z" fill="${c}"/>`;
+    s += `<circle cx="96" cy="52" r="21" fill="${d}"/><circle cx="96" cy="52" r="15" fill="${c}"/><circle cx="91" cy="47" r="4" fill="#fff" opacity=".4"/>`;
+    s += `<circle cx="164" cy="52" r="21" fill="${d}"/><circle cx="164" cy="52" r="15" fill="${c}"/><circle cx="159" cy="47" r="4" fill="#fff" opacity=".4"/>`;
+    if(id==='h10') s += bow(96,34,'#ffd95e',.9) + bow(164,34,'#ffd95e',.9);
+    s += hi('M88,70 Q100,58 114,56 Q98,64 90,76 Z',.35);
+  }
+  else if(id==='h4'){ // 麻花辫：碎波刘海 + 身前两条辫子（粉色发绳收尾）
+    s += `<path d="M74,104 C74,70 100,54 130,54 C160,54 186,70 186,104 C184,109 176,110 170,105 C164,112 154,114 148,107 C142,113 134,114 130,108 C126,114 118,113 112,107 C105,114 95,112 89,105 C83,110 76,109 74,104 Z" fill="${c}"/>`;
+    s += braid(82,118,74,186,c,d) + braid(178,118,186,186,c,d);
+    s += `<circle cx="82" cy="120" r="4" fill="#ff8fb0"/><circle cx="178" cy="120" r="4" fill="#ff8fb0"/>`;
+    s += hi('M84,70 Q100,56 122,54 Q104,66 90,82 Z',.4);
+  }
+  else if(id==='h5'||id==='h12'){ // 波波头/雾霾蓝短发：厚碎波刘海 + 及肩内扣侧发
+    s += `<path d="M72,106 C72,68 100,50 130,50 C160,50 188,68 188,106 C186,110 178,110 172,105 C166,111 156,113 150,106 C144,112 136,113 130,107 C124,113 116,112 110,106 C104,113 94,111 88,105 C82,110 74,110 72,106 Z" fill="${c}"/>`;
+    s += `<path d="M74,104 C64,132 62,168 70,196 C73,208 84,208 86,196 C80,168 82,134 90,108 Z" fill="${c}"/>`;
+    s += `<path d="M186,104 C196,132 198,168 190,196 C187,208 176,208 174,196 C180,168 178,134 170,108 Z" fill="${c}"/>`;
+    s += hi('M84,74 Q100,58 124,56 Q104,70 90,88 Z',.4);
+  }
+  else if(id==='h6'){ // 侧马尾：斜梳刘海 + 发绳蝴蝶结（马尾在脑后）
+    s += `<path d="M72,106 C72,66 100,50 132,50 C162,50 188,66 188,104 C184,110 174,110 166,104 C158,110 146,110 138,104 C130,110 116,110 106,105 C96,110 82,110 72,106 Z" fill="${c}"/>`;
+    s += bow(176,116,'#ff8fb0',1);
+    s += hi('M86,72 Q104,56 126,54 Q106,68 92,86 Z',.4);
+  }
+  else if(id==='h7'){ // 短碎发：空气感碎刘海 + 两侧翻翘碎发
+    s += `<path d="M74,104 C74,64 102,48 130,48 C158,48 186,64 186,104 C183,109 176,110 170,104 C166,110 158,112 152,105 C148,111 140,112 136,106 C132,112 124,111 120,105 C116,111 108,110 104,104 C98,110 88,110 84,104 C80,109 76,108 74,104 Z" fill="${c}"/>`;
+    s += `<path d="M76,102 C66,120 64,148 72,168 C76,177 86,174 84,164 C80,148 82,126 90,110 Z" fill="${c}"/>`;
+    s += `<path d="M184,102 C194,120 196,148 188,168 C184,177 174,174 176,164 C180,148 178,126 170,110 Z" fill="${c}"/>`;
     s += hi('M84,70 Q100,56 124,54 Q104,66 90,84 Z',.4);
-    if(id==='h1') s += `<path d="M104,52 L110,38 L120,50 L130,34 L140,50 L150,38 L156,52 Z" fill="#ffd95e" stroke="#e6b800" stroke-width="1.6"/><circle cx="130" cy="40" r="3" fill="#ff6b9d"/>`;
   }
-  else if(id==='h2'){ // 双马尾：齐刘海 + 鬓角小束 + 蝴蝶结
-    s += `<path d="M74,108 C74,72 100,56 130,56 C160,56 186,72 186,108 C184,113 173,116 161,116 C150,120 140,119 130,117 C120,119 110,120 99,116 C87,116 76,113 74,108 Z" fill="${c}"/>`;
-    s += `<path d="M74,116 C58,120 50,142 56,162 C60,174 70,170 70,158 C66,146 70,128 80,124 Z" fill="${c}"/>`;
-    s += `<path d="M186,116 C202,120 210,142 204,162 C200,174 190,170 190,158 C194,146 190,128 180,124 Z" fill="${c}"/>`;
-    s += bow(72,124,'#ff8fb0') + bow(188,124,'#ff8fb0');
-    s += hi('M84,74 Q100,60 122,58 Q104,70 90,86 Z',.4);
-  }
-  else if(id==='h3'||id==='h10'){ // 丸子头/酒红双丸子：微卷刘海 + 头顶两个丸子
-    s += `<path d="M76,108 C76,76 102,58 130,58 C158,58 184,76 184,108 C184,113 173,116 161,116 C150,120 140,119 130,117 C120,119 110,120 99,116 C87,116 76,113 76,108 Z" fill="${c}"/>`;
-    s += `<circle cx="98" cy="56" r="20" fill="${d}"/><circle cx="98" cy="56" r="14" fill="${c}"/>`;
-    s += `<circle cx="162" cy="56" r="20" fill="${d}"/><circle cx="162" cy="56" r="14" fill="${c}"/>`;
-    s += hi('M88,50 Q98,38 112,40 Q96,48 88,62 Z',.35);
-  }
-  else if(id==='h4'){ // 麻花辫：八字刘海 + 身前两条辫子
-    s += `<path d="M74,108 C74,74 100,58 130,58 C160,58 186,74 186,108 C184,113 173,116 162,115 C150,119 140,109 130,104 C120,109 110,119 98,115 C87,116 76,113 74,108 Z" fill="${c}"/>`;
-    s += braid(80,124,72,252,c,d) + braid(180,124,188,252,c,d);
-    s += hi('M84,74 Q100,60 122,58 Q104,70 90,86 Z',.4);
-  }
-  else if(id==='h5'||id==='h12'){ // 齐刘海波波头/雾霾蓝短发：厚齐刘海 + 及肩内扣
-    s += `<path d="M72,112 C72,74 100,54 130,54 C160,54 188,74 188,112 C184,117 173,120 161,120 C150,124 140,123 130,121 C120,123 110,124 99,120 C87,120 76,117 72,112 Z" fill="${c}"/>`;
-    s += `<path d="M74,112 C64,150 62,196 70,232 C74,244 86,240 86,228 C80,196 82,156 90,122 Z" fill="${c}"/>`;
-    s += `<path d="M186,112 C196,150 198,196 190,232 C186,244 174,240 174,228 C180,196 178,156 170,122 Z" fill="${c}"/>`;
-    s += hi('M84,78 Q100,62 124,60 Q104,74 90,90 Z',.4);
-  }
-  else if(id==='h6'){ // 侧马尾：斜刘海 + 右侧高马尾
-    s += `<path d="M72,108 C72,72 100,54 132,54 C162,54 188,72 188,108 C182,114 170,112 160,108 C148,118 120,114 104,108 C92,102 80,104 72,108 Z" fill="${c}"/>`;
-    s += `<path d="M150,96 C190,108 206,170 196,250 C192,272 174,264 176,244 C184,176 172,128 150,116 Z" fill="${d}"/>`;
-    s += `<path d="M152,100 C186,114 200,172 191,246 C188,264 174,258 176,242 C182,180 170,132 152,120 Z" fill="${c}"/>`;
-    s += `<ellipse cx="168" cy="118" rx="9" ry="6" fill="#ff8fb0"/>`;
-    s += hi('M84,74 Q100,60 124,58 Q104,70 90,86 Z',.4);
-  }
-  else if(id==='h7'){ // 短碎发：空气刘海 + 蓬松碎发
-    s += `<path d="M74,108 C74,70 102,52 130,52 C158,52 186,70 186,108 C184,113 173,116 161,116 C150,120 140,119 130,117 C120,119 110,120 99,116 C87,116 76,113 74,108 Z" fill="${c}"/>`;
-    s += `<path d="M76,108 C66,124 66,150 74,168 C78,176 86,172 84,162 C80,148 82,128 88,114 Z" fill="${c}"/>`;
-    s += `<path d="M184,108 C194,124 194,150 186,168 C182,176 174,172 176,162 C180,148 178,128 172,114 Z" fill="${c}"/>`;
-    s += hi('M84,72 Q100,58 124,56 Q104,68 90,84 Z',.4);
-  }
-  else { // 默认
-    s += `<path d="M74,108 C74,72 100,54 130,54 C160,54 186,72 186,108 C184,113 173,116 161,116 C150,120 140,119 130,117 C120,119 110,120 99,116 C87,116 76,113 74,108 Z" fill="${c}"/>`;
+  else { // 默认：碎波刘海
+    s += `<path d="M74,104 C74,66 100,50 130,50 C160,50 186,66 186,104 C184,109 176,110 170,105 C164,112 154,114 147,107 C141,113 133,114 130,108 C126,114 118,113 112,107 C105,114 95,112 89,105 C83,110 76,109 74,104 Z" fill="${c}"/>`;
   }
   return s;
 }
 function drawClothes(id){
-  // 上衣轮廓（只到腰，制造"衣服套在身体外"的层次，下方接裙摆/短下摆）
+  // 上衣轮廓（只到腰，制造"衣服套在身体外"的层次）
   const TOP='M88,184 C80,224 92,250 100,254 L160,254 C168,250 180,224 172,184 C160,176 146,174 130,174 C114,174 102,176 88,184 Z';
   const SC='M84,332 q12,14 24,0 q12,14 24,0 q12,14 24,0 q12,14 24,0';
-  // 衣服描边色（任意衣色上都成立，让衣服边缘与皮肤区分 → 像"穿"上去而非贴片）
   const OUT='rgba(0,0,0,.22)';
   const WAIST='rgba(0,0,0,.14)';
   const star=(cx,cy,s)=>{const P=[[0,-6],[1.8,-1.8],[6,-1.8],[2.6,1],[3.8,5],[0,2.6],[-3.8,5],[-2.6,1],[-6,-1.8],[-1.8,-1.8]];return 'M'+P.map(p=>(cx+s*p[0]).toFixed(1)+','+(cy+s*p[1]).toFixed(1)).join(' L')+' Z';};
   const bow=(x,y,c)=>`<path d="M${x},${y} q-9,-2 -11,7 l9,1 Z" fill="${c}"/><path d="M${x+18},${y} q9,-2 11,7 l-9,1 Z" fill="${c}"/><circle cx="${x+9}" cy="${y+4}" r="3" fill="${c}"/>`;
-  const sash=(c)=>`<path d="M112,248 Q130,256 148,248" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round"/>`;
-  // 短袖：覆盖肩到上臂，袖口收边，露出小臂 → 明显"穿上"的层次
-  const sleeve=(c,cuff,dir)=>{
-    if(dir<0) return `<path d="M92,189 C76,197 70,232 78,250 C86,256 98,252 98,238 C94,224 100,206 104,195 Z" fill="${c}"/><path d="M77,247 q11,9 22,1 q1,-6 -3,-8 q-10,3 -19,7 Z" fill="${cuff}"/><path d="M86,200 C78,222 80,238 84,248" stroke="#fff" stroke-width="2.5" opacity=".22" fill="none" stroke-linecap="round"/>`;
-    return `<path d="M168,189 C184,197 190,232 182,250 C174,256 162,252 162,238 C166,224 160,206 156,195 Z" fill="${c}"/><path d="M183,247 q-11,9 -22,1 q-1,-6 3,-8 q10,3 19,7 Z" fill="${cuff}"/><path d="M174,200 C182,222 180,238 176,248" stroke="#fff" stroke-width="2.5" opacity=".22" fill="none" stroke-linecap="round"/>`;
+  const heart=(x,y,s,c)=>`<path d="M${x},${y+s*0.85} C${x-s},${y-0.1*s} ${x-s*0.65},${y-s} ${x},${y-s*0.3} C${x+s*0.65},${y-s} ${x+s},${y-0.1*s} ${x},${y+s*0.85} Z" fill="${c}"/>`;
+  const sash=(c)=>`<path d="M112,248 Q130,256 148,248" fill="none" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>`;
+  // 袖子：按每件衣服的 sl 决定袖长——短袖露半只小手，长袖只露指尖（外露皮肤程度随衣服不同）
+  const sleeve=(c,cuff,dir,ln)=>{
+    if(ln==='long'){
+      if(dir<0) return `<path d="M92,189 C74,197 66,238 74,262 C81,270 96,267 97,253 C93,236 100,206 104,195 Z" fill="${c}"/><path d="M73,258 q11,8 23,0 q1,-6 -3,-8 q-10,3 -19,7 Z" fill="${cuff}"/><path d="M84,198 C74,220 72,244 76,258" stroke="#fff" stroke-width="1.9" opacity=".22" fill="none" stroke-linecap="round"/>`;
+      return `<path d="M168,189 C186,197 194,238 186,262 C179,270 164,267 163,253 C167,236 160,206 156,195 Z" fill="${c}"/><path d="M187,258 q-11,8 -23,0 q-1,-6 3,-8 q10,3 19,7 Z" fill="${cuff}"/><path d="M176,198 C186,220 188,244 184,258" stroke="#fff" stroke-width="1.9" opacity=".22" fill="none" stroke-linecap="round"/>`;
+    }
+    if(dir<0) return `<path d="M92,189 C76,197 70,232 78,250 C86,256 98,252 98,238 C94,224 100,206 104,195 Z" fill="${c}"/><path d="M77,247 q11,9 22,1 q1,-6 -3,-8 q-10,3 -19,7 Z" fill="${cuff}"/><path d="M86,200 C78,222 80,238 84,248" stroke="#fff" stroke-width="1.9" opacity=".22" fill="none" stroke-linecap="round"/>`;
+    return `<path d="M168,189 C184,197 190,232 182,250 C174,256 162,252 162,238 C166,224 160,206 156,195 Z" fill="${c}"/><path d="M183,247 q-11,9 -22,1 q-1,-6 3,-8 q10,3 19,7 Z" fill="${cuff}"/><path d="M174,200 C182,222 180,238 176,248" stroke="#fff" stroke-width="1.9" opacity=".22" fill="none" stroke-linecap="round"/>`;
   };
-  // 圆领口：露出脖子下的皮肤 + 领边，让衣服"有领子"
-  const neck=(nc)=>`<path d="M108,187 Q130,209 152,187 Q130,200 108,187 Z" fill="${SKIN}"/><path d="M108,187 Q130,209 152,187" fill="none" stroke="${nc}" stroke-width="3" stroke-linecap="round"/>`;
-  // 衣身圆柱明暗（左亮右暗）：让上衣"裹"在身体外，而不是贴在上面
+  // 圆领口：露出脖子下大片胸口皮肤（月牙加大，明显是肤色而不是衣服色）+ 领边细线 + 锁骨柔影
+  const neck=(nc)=>`<path d="M104,184 Q130,226 156,184 Q130,196 104,184 Z" fill="${SKIN}"/><path d="M112,201 Q130,208 148,201" stroke="${SKIN_D}" stroke-width="1.2" fill="none" stroke-linecap="round" opacity=".3"/><path d="M104,184 Q130,226 156,184" fill="none" stroke="${nc}" stroke-width="1.5" stroke-linecap="round"/>`;
+  // 衣身圆柱明暗
   const shade=()=>`<path d="M110,192 C102,222 110,248 118,252 L126,252 C118,248 116,222 122,192 Z" fill="#fff" opacity=".18"/><path d="M152,192 C166,226 162,250 152,254 C164,250 170,226 162,192 Z" fill="#000" opacity=".18"/>`;
-  // 裙摆：腰部收、下摆展开 + 花边 + 竖向褶皱阴影 + 两侧包裹暗部
-  const skirt=(c,hemC)=>`<path d="M99,250 L80,332 Q130,350 180,332 L161,250 Q130,262 99,250 Z" fill="${c}" stroke="${OUT}" stroke-width="1.8"/><path d="${SC}" fill="${hemC}"/><path d="M110,256 L100,330 M130,260 L130,338 M150,256 L160,330" stroke="#000" stroke-width="1.5" opacity=".1" fill="none"/><path d="M99,252 L84,332 Q95,336 100,330 L112,256 Z" fill="#000" opacity=".08"/><path d="M161,252 L176,332 Q165,336 160,330 L148,256 Z" fill="#000" opacity=".08"/>`;
+  // 裙摆：腰部收、下摆展开 + 双层花边 + 柔和褶皱阴影
+  const skirt=(c,hemC)=>`<path d="M99,248 L78,334 Q130,354 182,334 L161,248 Q130,254 99,248 Z" fill="${c}" stroke="${OUT}" stroke-width="0.8"/><path d="${SC}" fill="${hemC}"/><path d="M92,337 q12,13 24,0 q12,13 24,0 q12,13 24,0 q12,13 24,0" fill="none" stroke="${OUT}" stroke-width="0.8" opacity=".28"/><path d="M112,258 C104,284 102,312 106,332 M130,262 L130,340 M148,258 C156,284 158,312 154,332" stroke="#000" stroke-width="1.15" opacity=".1" fill="none"/><path d="M99,252 L82,334 Q94,338 99,332 L112,256 Z" fill="#000" opacity=".08"/><path d="M161,252 L178,334 Q166,338 161,332 L148,256 Z" fill="#000" opacity=".08"/>`;
   // 上衣短下摆（top 款）
-  const topHem=(c)=>`<path d="M100,252 Q130,262 160,252 L159,300 Q130,310 101,300 Z" fill="${c}"/><path d="M102,290 Q130,300 158,290" stroke="#000" stroke-width="1.5" opacity=".1" fill="none"/>`;
+  const topHem=(c)=>`<path d="M98,252 Q130,262 162,252 L161,304 Q130,314 99,304 Z" fill="${c}"/><path d="M102,294 Q130,304 158,294" stroke="#000" stroke-width="1.15" opacity=".1" fill="none"/>`;
   const defs={
-    c1:{type:'dress',main:'#ffb3d1',skirt:'#ffc8e0',hem:'#ffd9ea',cuff:'#ff9ec4',neckc:'#ff7fb0',dec:`${sash('#ff7fb0')}${bow(112,244,'#ff7fb0')}<path d="M130,214 l5,9 -5,4 -5,-4 Z" fill="#ff5e9a"/>`},
-    c2:{type:'dress',main:'#fdfdff',skirt:'#ffffff',hem:'#f3f6fc',cuff:'#e9edf5',neckc:'#d9deea',dec:`<path d="M98,258 q11,15 22,0 q11,15 22,0 q11,15 22,0" fill="#ffffff"/><circle cx="130" cy="222" r="5" fill="#ffb6d0"/>${bow(121,219,'#ff9ec4')}`},
-    c3:{type:'top',main:'#eef2f7',cuff:'#dfe6ef',neckc:'#c7d0dc',dec:`<ellipse cx="130" cy="196" rx="22" ry="8" fill="#dfe6ef" stroke="#c7d0dc" stroke-width="1.5"/><rect x="116" y="214" width="28" height="22" rx="5" fill="#cfe0f5" stroke="#9fc1e8" stroke-width="1.5"/><circle cx="124" cy="225" r="3" fill="#ff7f7f"/><circle cx="136" cy="225" r="3" fill="#7fd08a"/><path d="M100,252 q30,10 60,0" fill="none" stroke="#d7dde6" stroke-width="3"/><circle cx="110" cy="258" r="4" fill="#9bd0ff"/><circle cx="150" cy="258" r="4" fill="#ff9bb3"/>`},
-    c4:{type:'dress',main:'#b98bff',skirt:'#c9abff',hem:'#ddc9ff',cuff:'#a06fe0',neckc:'#a06fe0',dec:`${sash('#a06fe0')}${bow(112,244,'#a06fe0')}<g fill="#ffe27a"><path d="${star(118,286,1)}"/><path d="${star(146,300,0.85)}"/><path d="${star(130,266,0.7)}"/></g>`},
-    c5:{type:'dress',main:'#9fd9a8',skirt:'#bfe8c6',hem:'#a9dcb4',cuff:'#7cc98c',neckc:'#7cc98c',dec:`<path d="M110,275 q-10,-6 -14,2 q10,4 14,-2 Z" fill="#7cc98c"/><path d="M150,275 q10,-6 14,2 q-10,4 -14,-2 Z" fill="#7cc98c"/><circle cx="130" cy="252" r="6" fill="#ff9bb3"/><circle cx="130" cy="252" r="3" fill="#ffe27a"/>`},
-    c6:{type:'top',main:'#9fc1e8',cuff:'#7f9fce',neckc:'#7f9fce',dec:`<path d="M112,200 L110,248 M148,200 L150,248" stroke="#7f9fce" stroke-width="7" stroke-linecap="round"/><circle cx="112" cy="244" r="4" fill="#ffd95e"/><circle cx="148" cy="244" r="4" fill="#ffd95e"/><rect x="118" y="276" width="24" height="20" rx="3" fill="none" stroke="#eaf2fb" stroke-width="1.5"/>`},
-    c7:{type:'dress',main:'#ff8f8f',skirt:'#ff9f9f',hem:'#ffbcbc',cuff:'#e85f5f',neckc:'#e85f5f',dec:`<g fill="#fff" opacity=".9"><circle cx="112" cy="276" r="4"/><circle cx="140" cy="276" r="4"/><circle cx="126" cy="296" r="4"/><circle cx="150" cy="308" r="4"/><circle cx="104" cy="308" r="4"/></g>${sash('#e85f5f')}${bow(112,244,'#e85f5f')}`},
+    c1:{type:'dress',sl:'long',main:'#ffb3d1',skirt:'#ffc8e0',hem:'#ffd9ea',cuff:'#ff9ec4',neckc:'#ff7fb0',dec:`${sash('#ff7fb0')}${bow(112,244,'#ff7fb0')}<path d="M130,214 l5,9 -5,4 -5,-4 Z" fill="#ff5e9a"/><g fill="#fff" opacity=".85"><circle cx="104" cy="292" r="2.6"/><circle cx="126" cy="304" r="2.6"/><circle cx="148" cy="292" r="2.6"/><circle cx="115" cy="318" r="2.6"/><circle cx="140" cy="318" r="2.6"/></g>${heart(158,300,7,'#fff')}`},
+    c2:{type:'dress',main:'#fdfdff',skirt:'#ffffff',hem:'#f3f6fc',cuff:'#e9edf5',neckc:'#d9deea',dec:`<path d="M98,258 q11,15 22,0 q11,15 22,0 q11,15 22,0" fill="#ffffff"/><path d="M94,278 q13,16 26,0 q13,16 26,0 q13,16 26,0" fill="#ffffff" opacity=".85"/><circle cx="130" cy="222" r="5" fill="#ffb6d0"/>${bow(121,219,'#ff9ec4')}`},
+    c3:{type:'top',main:'#eef2f7',cuff:'#dfe6ef',neckc:'#c7d0dc',dec:`<ellipse cx="130" cy="196" rx="22" ry="8" fill="#dfe6ef" stroke="#c7d0dc" stroke-width="1.15"/><rect x="116" y="214" width="28" height="22" rx="5" fill="#cfe0f5" stroke="#9fc1e8" stroke-width="1.15"/><circle cx="124" cy="225" r="3" fill="#ff7f7f"/><circle cx="136" cy="225" r="3" fill="#7fd08a"/><path d="M100,252 q30,10 60,0" fill="none" stroke="#d7dde6" stroke-width="2.2"/><circle cx="110" cy="258" r="4" fill="#9bd0ff"/><circle cx="150" cy="258" r="4" fill="#ff9bb3"/><path d="M118,240 l4,6 -4,3 -4,-3 Z" fill="#ffd95e"/>`},
+    c4:{type:'dress',main:'#b98bff',skirt:'#c9abff',hem:'#ddc9ff',cuff:'#a06fe0',neckc:'#a06fe0',dec:`${sash('#a06fe0')}${bow(112,244,'#a06fe0')}<g fill="#ffe27a"><path d="${star(118,286,1)}"/><path d="${star(146,300,0.85)}"/><path d="${star(130,266,0.7)}"/><path d="${star(104,310,0.6)}"/></g><path d="M158,282 a7,7 0 1,0 0.1,0 Z" fill="#ffe27a" opacity=".9"/><path d="M158,275 a7,7 0 0,1 0,14" fill="#c9abff"/>`},
+    c5:{type:'dress',main:'#9fd9a8',skirt:'#bfe8c6',hem:'#a9dcb4',cuff:'#7cc98c',neckc:'#7cc98c',dec:`<path d="M110,275 q-10,-6 -14,2 q10,4 14,-2 Z" fill="#7cc98c"/><path d="M150,275 q10,-6 14,2 q-10,4 -14,-2 Z" fill="#7cc98c"/><circle cx="130" cy="252" r="6" fill="#ff9bb3"/><circle cx="130" cy="252" r="3" fill="#ffe27a"/><g fill="#7cc98c" opacity=".8"><ellipse cx="104" cy="300" rx="6" ry="3"/><ellipse cx="152" cy="306" rx="6" ry="3"/><ellipse cx="126" cy="320" rx="6" ry="3"/></g>`},
+    c6:{type:'top',sl:'long',main:'#9fc1e8',cuff:'#7f9fce',neckc:'#7f9fce',dec:`<path d="M112,200 L110,248 M148,200 L150,248" stroke="#7f9fce" stroke-width="5.5" stroke-linecap="round"/><circle cx="112" cy="244" r="4" fill="#ffd95e"/><circle cx="148" cy="244" r="4" fill="#ffd95e"/><rect x="118" y="276" width="24" height="20" rx="3" fill="none" stroke="#eaf2fb" stroke-width="1.15"/><path d="M118,276 l24,20 M142,276 l-24,20" stroke="#eaf2fb" stroke-width="0.8" opacity=".6"/>`},
+    c7:{type:'dress',main:'#ff8f8f',skirt:'#ff9f9f',hem:'#ffbcbc',cuff:'#e85f5f',neckc:'#e85f5f',dec:`<g fill="#fff" opacity=".9"><circle cx="112" cy="276" r="4"/><circle cx="140" cy="276" r="4"/><circle cx="126" cy="296" r="4"/><circle cx="150" cy="308" r="4"/><circle cx="104" cy="308" r="4"/></g>${sash('#e85f5f')}${bow(112,244,'#e85f5f')}<circle cx="130" cy="220" r="3.4" fill="#fff" opacity=".9"/>`},
     c8:{type:'dress',main:'#ffd95e',skirt:'#ffe488',hem:'#ffe9a8',cuff:'#ffb22e',neckc:'#ffb22e',dec:`<g fill="#ffb22e"><circle cx="130" cy="250" r="4"/><circle cx="130" cy="274" r="4"/><circle cx="118" cy="262" r="4"/><circle cx="142" cy="262" r="4"/><circle cx="122" cy="254" r="4"/><circle cx="138" cy="254" r="4"/><circle cx="122" cy="270" r="4"/><circle cx="138" cy="270" r="4"/></g><circle cx="130" cy="262" r="8" fill="#7a4a1f"/><path d="M100,300 q-8,-4 -12,2 q8,3 12,-2 Z" fill="#7cc98c"/><path d="M160,300 q8,-4 12,2 q-8,3 -12,-2 Z" fill="#7cc98c"/>`},
   };
   const d=defs[id]||defs.c1;
   let s=`<g>`;
   if(d.type==='dress') s+=skirt(d.skirt,d.hem);
-  s+=`<path d="${TOP}" fill="${d.main}" stroke="${OUT}" stroke-width="1.6"/>`;
+  s+=`<path d="${TOP}" fill="${d.main}" stroke="${OUT}" stroke-width="1.15"/>`;
   if(d.type!=='dress') s+=topHem(d.main);
   s+=shade();
-  s+=sleeve(d.main,d.cuff,-1)+sleeve(d.main,d.cuff,1);
+  s+=sleeve(d.main,d.cuff,-1,d.sl)+sleeve(d.main,d.cuff,1,d.sl);
   s+=neck(d.neckc);
-  // 腰线接缝：明确衣服"穿在身上"的分界（上衣下摆 / 连衣裙收腰）
-  s+=`<path d="M100,252 Q130,262 160,252" fill="none" stroke="${OUT}" stroke-width="2.2"/>`;
-  // 腰线下方阴影带：模拟布料在腰际自然堆叠/包裹身体
+  // 腰线接缝 + 腰线下阴影带
+  s+=`<path d="M100,252 Q130,262 160,252" fill="none" stroke="${OUT}" stroke-width="1.15"/>`;
   s+=`<path d="M100,255 Q130,265 160,255 L159,264 Q130,274 101,264 Z" fill="${WAIST}" opacity=".55"/>`;
-  if(d.type==='dress') s+=`<path d="M100,250 Q130,260 160,250" fill="none" stroke="#fff" stroke-width="1.2" opacity=".28"/>`;
+  if(d.type==='dress') s+=`<path d="M100,250 Q130,260 160,250" fill="none" stroke="#fff" stroke-width="0.8" opacity=".28"/>`;
   s+=d.dec;
-  // 布料高光（整体左缘提亮）
-  s+=`<path d="M104,196 C98,224 104,248 112,252" stroke="#fff" stroke-width="3" opacity=".12" fill="none" stroke-linecap="round"/>`;
+  s+=`<path d="M104,196 C98,224 104,248 112,252" stroke="#fff" stroke-width="2.2" opacity=".12" fill="none" stroke-linecap="round"/>`;
   s+=`</g>`;
   return s;
 }
 function drawShoes(id){
   const pair = (fn)=> fn(112) + fn(148);
   switch(id){
-    case 's1': return pair(x=>`<path d="M${x-16},430 Q${x-18},452 ${x},452 L${x+13},452 Q${x+15},444 ${x+12},434 Z" fill="#ff9ec4"/><rect x="${x+9}" y="448" width="6" height="9" rx="2" fill="#ffd1e6"/>`);
-    case 's2': return pair(x=>`<path d="M${x-16},432 Q${x-18},450 ${x},450 L${x+14},450 Q${x+16},442 ${x+12},434 Z" fill="#ffb6d0"/><path d="M${x-6},436 Q${x},428 ${x+8},436" stroke="#ff7fb0" stroke-width="2.5" fill="none"/>`);
-    case 's3': return pair(x=>`<path d="M${x-14},386 L${x-16},450 Q${x-16},456 ${x-8},456 L${x+14},456 Q${x+18},456 ${x+16},448 L${x+14},386 Z" fill="#eef2f7" stroke="#d7dde6" stroke-width="1.5"/><rect x="${x-14}" y="430" width="28" height="6" fill="#cdd6e2"/>`);
-    case 's4': return pair(x=>`<path d="M${x-16},432 Q${x-18},452 ${x},452 L${x+15},452 Q${x+17},444 ${x+14},434 Z" fill="#9bd0ff"/><path d="M${x-12},438 L${x+12},438" stroke="#fff" stroke-width="3"/><path d="M${x-14},446 L${x+14},446" stroke="#ff9bb3" stroke-width="3"/>`);
-    case 's5': return pair(x=>`<path d="M${x-15},420 L${x-17},452 Q${x-17},458 ${x-9},458 L${x+15},458 Q${x+19},458 ${x+17},450 L${x+15},420 Z" fill="#ffe27a" stroke="#e6c24a" stroke-width="1.5"/><circle cx="${x}" cy="436" r="4" fill="#fff"/>`);
-    case 's6': return pair(x=>`<path d="M${x-16},432 Q${x-18},452 ${x},452 L${x+14},452 Q${x+16},444 ${x+12},434 Z" fill="#3a2b3a"/><path d="M${x-8},436 L${x+10},436" stroke="#ff9bb3" stroke-width="3"/>`);
-    case 's7': return pair(x=>`<path d="M${x-15},436 Q${x},430 ${x+15},436 L${x+13},446 Q${x},442 ${x-13},446 Z" fill="#ffb36b"/><path d="M${x-10},436 L${x+10},436" stroke="#fff" stroke-width="2.5"/><path d="M${x-6},436 L${x-6},446 M${x+6},436 L${x+6},446" stroke="#e08a4a" stroke-width="2"/>`);
-    case 's8': return pair(x=>`<path d="M${x-16},434 Q${x-20},452 ${x-2},452 L${x+15},452 Q${x+19},452 ${x+16},440 Q${x+12},432 ${x-10},432 Z" fill="#ffffff" stroke="#e6e6e6" stroke-width="1.5"/><circle cx="${x-6}" cy="442" r="3" fill="#fff"/><circle cx="${x+6}" cy="444" r="3" fill="#fff"/>`);
+    case 's1': return pair(x=>`<path d="M${x-16},428 Q${x-19},452 ${x-2},453 L${x+12},453 Q${x+16},446 ${x+13},433 Z" fill="#ff9ec4"/><path d="M${x-16},428 Q${x-19},452 ${x-2},453 L${x+12},453 Q${x+16},446 ${x+13},433" fill="none" stroke="#e87aa8" stroke-width="0.8" opacity=".8"/><rect x="${x+8}" y="447" width="7" height="9" rx="2.5" fill="#ffd1e6"/><path d="M${x-11},434 q5,-6 10,-2 q-2,6 -10,2 Z" fill="#fff" opacity=".85"/>`);
+    case 's2': return pair(x=>`<path d="M${x-16},430 Q${x-18},450 ${x},450 L${x+14},450 Q${x+16},442 ${x+12},434 Z" fill="#ffb6d0"/><path d="M${x-6},437 Q${x},428 ${x+8},437" stroke="#ff7fb0" stroke-width="1.9" fill="none"/><circle cx="${x-10}" cy="437" r="2.2" fill="#fff" opacity=".8"/>`);
+    case 's3': return pair(x=>`<path d="M${x-14},386 L${x-16},450 Q${x-16},456 ${x-8},456 L${x+14},456 Q${x+18},456 ${x+16},448 L${x+14},386 Z" fill="#eef2f7" stroke="#d7dde6" stroke-width="1.15"/><rect x="${x-14}" y="430" width="28" height="6" fill="#cdd6e2"/><circle cx="${x}" cy="404" r="3" fill="#ffd95e"/><path d="M${x-10},392 L${x-10},446" stroke="#fff" stroke-width="1.15" opacity=".6"/>`);
+    case 's4': return pair(x=>`<path d="M${x-16},432 Q${x-18},452 ${x},452 L${x+15},452 Q${x+17},444 ${x+14},434 Z" fill="#9bd0ff"/><path d="M${x-12},438 L${x+12},438" stroke="#fff" stroke-width="2.2"/><path d="M${x-14},446 L${x+14},446" stroke="#ff9bb3" stroke-width="2.2"/><path d="M${x-6},432 l3,5 5,1 -4,3 1,5 -5,-3 -5,3 1,-5 -4,-3 5,-1 Z" fill="#ffd95e" opacity=".9"/>`);
+    case 's5': return pair(x=>`<path d="M${x-15},420 L${x-17},452 Q${x-17},458 ${x-9},458 L${x+15},458 Q${x+19},458 ${x+17},450 L${x+15},420 Z" fill="#ffe27a" stroke="#e6c24a" stroke-width="1.15"/><circle cx="${x}" cy="436" r="4" fill="#fff"/><path d="M${x-11},444 q11,5 22,0" stroke="#e6c24a" stroke-width="1.15" fill="none"/>`);
+    case 's6': return pair(x=>`<path d="M${x-16},432 Q${x-18},452 ${x},452 L${x+14},452 Q${x+16},444 ${x+12},434 Z" fill="#3a2b3a"/><path d="M${x-8},436 L${x+10},436" stroke="#ff9bb3" stroke-width="2.2"/><circle cx="${x+10}" cy="436" r="2.4" fill="#ffd95e"/><path d="M${x-12},446 L${x+10},446" stroke="#5a4a5a" stroke-width="1.15" opacity=".8"/>`);
+    case 's7': return pair(x=>`<path d="M${x-15},436 Q${x},430 ${x+15},436 L${x+13},446 Q${x},442 ${x-13},446 Z" fill="#ffb36b"/><path d="M${x-10},436 L${x+10},436" stroke="#fff" stroke-width="1.9"/><path d="M${x-6},436 L${x-6},446 M${x+6},436 L${x+6},446" stroke="#e08a4a" stroke-width="1.15"/><circle cx="${x}" cy="432" r="2.4" fill="#ff8fb0"/>`);
+    case 's8': return pair(x=>`<path d="M${x-16},434 Q${x-20},452 ${x-2},452 L${x+15},452 Q${x+19},452 ${x+16},440 Q${x+12},432 ${x-10},432 Z" fill="#ffffff" stroke="#e6e6e6" stroke-width="1.15"/><circle cx="${x-6}" cy="442" r="3" fill="#f3e6ee"/><circle cx="${x+6}" cy="444" r="3" fill="#f3e6ee"/><circle cx="${x}" cy="437" r="4.5" fill="#ffd9ea"/><circle cx="${x}" cy="437" r="2" fill="#fff"/>`);
   }
   return pair(x=>`<ellipse cx="${x}" cy="442" rx="16" ry="12" fill="#ffd6e7"/>`);
 }
 function drawHat(id){
   if(id==='h0') return '';
   switch(id){
-    case 'h1': return `<path d="M104,60 L108,46 L118,56 L130,44 L142,56 L152,46 L156,60 Z" fill="#ffd95e" stroke="#e6b800" stroke-width="1.5"/><circle cx="130" cy="50" r="3" fill="#ff6b9d"/>`;
-    case 'h2': return `<ellipse cx="130" cy="60" rx="46" ry="10" fill="#e8c98a" stroke="#cda86a" stroke-width="1.5"/><path d="M104,60 Q104,30 130,30 Q156,30 156,60 Z" fill="#f0d8a6" stroke="#cda86a" stroke-width="1.5"/>`;
-    case 'h3': return `<path d="M104,60 Q104,34 130,34 Q156,34 156,60 Z" fill="#ff9ec4" stroke="#e87aa8" stroke-width="1.5"/><circle cx="130" cy="32" r="8" fill="#fff"/>`;
-    case 'h4': return `<path d="M130,52 L112,40 L120,52 L130,46 L140,52 L148,40 Z" fill="#ff7fb0" stroke="#e85f96" stroke-width="1"/><circle cx="130" cy="50" r="5" fill="#ff4f8f"/>`;
+    case 'h1': return `<path d="M102,58 L108,42 L118,54 L130,40 L142,54 L152,42 L158,58 Z" fill="#ffd95e" stroke="#e6b800" stroke-width="1.15"/><circle cx="130" cy="47" r="3.4" fill="#ff6b9d"/><circle cx="112" cy="53" r="2.2" fill="#8fd0ff"/><circle cx="148" cy="53" r="2.2" fill="#8fd0ff"/>`;
+    case 'h2': return `<ellipse cx="130" cy="62" rx="48" ry="11" fill="#e8c98a" stroke="#cda86a" stroke-width="1.15"/><path d="M106,62 Q106,30 130,30 Q154,30 154,62 Z" fill="#f0d8a6" stroke="#cda86a" stroke-width="1.15"/><path d="M106,55 Q130,63 154,55 L154,62 Q130,70 106,62 Z" fill="#ff9ec4"/><circle cx="150" cy="48" r="4" fill="#ff8fb0"/><circle cx="150" cy="48" r="1.6" fill="#ffe27a"/>`;
+    case 'h3': return `<path d="M104,60 Q104,32 130,32 Q156,32 156,60 Z" fill="#ff9ec4" stroke="#e87aa8" stroke-width="1.15"/><rect x="102" y="54" width="56" height="9" rx="4.5" fill="#ff8ab8"/><circle cx="130" cy="30" r="9" fill="#fff"/><circle cx="127" cy="27" r="2.4" fill="#ffd9ea"/>`;
+    case 'h4': return `<path d="M130,50 L110,36 L119,50 L130,43 L141,50 L150,36 Z" fill="#ff7fb0" stroke="#e85f96" stroke-width="0.9"/><circle cx="130" cy="47" r="5.4" fill="#ff4f8f"/><path d="M124,52 q-6,10 -2,18 M136,52 q6,10 2,18" stroke="#ff7fb0" stroke-width="2.2" fill="none" stroke-linecap="round"/>`;
   }
   return '';
 }
 function drawBag(id){
   if(id==='b0') return '';
   switch(id){
-    case 'b1': return `<path d="M150,300 L208,250" stroke="#c98a4a" stroke-width="3" fill="none"/><rect x="186" y="262" width="30" height="26" rx="6" fill="#ffb36b" stroke="#d98a4a" stroke-width="1.5"/>`;
-    case 'b2': return `<path d="M196,286 Q208,276 214,288" stroke="#bbb" stroke-width="3" fill="none"/><path d="M190,290 L214,290 L220,318 L184,318 Z" fill="#ff8fb0" stroke="#e07" stroke-width="1.5"/>`;
-    case 'b3': return `<path d="M186,280 Q186,266 202,266 Q218,266 218,280" stroke="#7fb0d8" stroke-width="3" fill="none"/><rect x="188" y="278" width="30" height="34" rx="10" fill="#9bd0ff" stroke="#5a9bd0" stroke-width="1.5"/>`;
+    case 'b1': return `<path d="M152,296 L204,252" stroke="#c98a4a" stroke-width="0.8" fill="none"/><rect x="184" y="258" width="34" height="30" rx="9" fill="#ffb36b" stroke="#d98a4a" stroke-width="1.15"/><path d="M184,272 L218,272" stroke="#d98a4a" stroke-width="1.05"/><circle cx="201" cy="266" r="2.6" fill="#ffe27a"/>`;
+    case 'b2': return `<path d="M194,284 Q208,272 216,286" stroke="#c9c9c9" stroke-width="0.8" fill="none"/><path d="M190,288 L218,288 L224,320 L184,320 Z" fill="#ff8fb0" stroke="#e86a9a" stroke-width="1.15"/><path d="M190,288 L224,288 L221,298 L187,298 Z" fill="#ff7aa6"/><circle cx="204" cy="304" r="3" fill="#ffe27a"/>`;
+    case 'b3': return `<path d="M186,278 Q186,262 202,262 Q218,262 218,278" stroke="#7fb0d8" stroke-width="0.8" fill="none"/><rect x="186" y="276" width="32" height="36" rx="11" fill="#9bd0ff" stroke="#5a9bd0" stroke-width="1.15"/><path d="M186,288 L218,288" stroke="#5a9bd0" stroke-width="1.05"/><circle cx="202" cy="296" r="3" fill="#fff"/>`;
   }
   return '';
 }
 function featFace(o){
   const eyeId=o.eye||'e1', shId=o.shadow||'s1', liId=o.liner||'l1', lpId=o.lip||'p1', erId=o.ear||'r0';
   const eye=gdPart('eye',eyeId), sh=gdPart('shadow',shId), li=gdPart('liner',liId), lp=gdPart('lip',lpId), er=gdPart('ear',erId);
-  const EL=[108,120], ER=[152,120];
+  const EL=[107,121], ER=[153,121];
   let s='';
   // 眼影
-  if(sh.id!=='s1'){ [EL,ER].forEach(([x,y])=>{ s+=`<ellipse cx="${x}" cy="${y-11}" rx="15" ry="9" fill="${sh.swatch}" opacity=".55"/>`; }); }
-  // 腮红：双层柔和粉晕 + 高光小点
+  if(sh.id!=='s1'){ [EL,ER].forEach(([x,y])=>{ s+=`<ellipse cx="${x}" cy="${y-13}" rx="15" ry="9" fill="${sh.swatch}" opacity=".5"/>`; }); }
+  // 腮红：三层超柔粉晕 + 双高光小点（像刚跑完步的粉扑扑脸颊）
   [EL,ER].forEach(([x,y])=>{
-    s+=`<ellipse cx="${x}" cy="${y+18}" rx="14" ry="8" fill="#ff9ac0" opacity=".42"/>`;
-    s+=`<ellipse cx="${x}" cy="${y+16}" rx="8" ry="5" fill="#ff7fb0" opacity=".3"/>`;
-    s+=`<circle cx="${x-3}" cy="${y+15}" r="1.6" fill="#fff" opacity=".85"/>`;
+    s+=`<ellipse cx="${x}" cy="${y+20}" rx="17" ry="10" fill="#ff9ac0" opacity=".35"/>`;
+    s+=`<ellipse cx="${x}" cy="${y+19}" rx="12.5" ry="7.5" fill="#ff8cba" opacity=".34"/>`;
+    s+=`<ellipse cx="${x}" cy="${y+18}" rx="7.5" ry="4.6" fill="#ff6fae" opacity=".3"/>`;
+    s+=`<circle cx="${x-4.5}" cy="${y+17}" r="1.7" fill="#fff" opacity=".95"/>`;
+    s+=`<circle cx="${x+3.5}" cy="${y+21}" r="1.2" fill="#fff" opacity=".7"/>`;
   });
-  // 眼睛（含虹膜/瞳孔/高光，水汪汪大眼）
+  // 水润大眼（虹膜渐变 + 双高光 + 睫毛）
+  const lash=(x,y,side)=>`<path d="M${x+side*10},${y-10} q${side*6},${-2} ${side*8},${-6}" stroke="#3a2b3a" stroke-width="0.8" fill="none" stroke-linecap="round"/>`;
   const eyeShape=(x,y,k)=>{
+    const side = x<130?-1:1;
     if(k==='e3'){ // 弯弯笑眼
-      let g=`<path d="M${x-12},${y+2} Q${x},${y-12} ${x+12},${y+2}" stroke="#3a2b3a" stroke-width="3.6" fill="none" stroke-linecap="round"/>`;
-      g+=`<path d="M${x-9},${y-1} Q${x},${y-9} ${x+9},${y-1}" stroke="#3a2b3a" stroke-width="1.8" fill="none" stroke-linecap="round" opacity=".45"/>`;
+      let g=`<path d="M${x-12},${y+3} Q${x},${y-12} ${x+12},${y+3}" stroke="#3a2b3a" stroke-width="1.15" fill="none" stroke-linecap="round"/>`;
+      g+=`<path d="M${x-8},${y+1} Q${x},${y-8} ${x+8},${y+1}" stroke="#3a2b3a" stroke-width="1.15" fill="none" stroke-linecap="round" opacity=".4"/>`;
+      g+=lash(x,y,side);
       return g;
     }
     if(k==='e4'){ // 闪亮星眼
-      let p=''; for(let i=0;i<10;i++){ const a=Math.PI/5*i - Math.PI/2; const r=i%2?5:12; p+=(i?'L':'M')+(x+r*Math.cos(a)).toFixed(1)+','+(y+r*Math.sin(a)).toFixed(1)+' '; }
+      let p=''; for(let i=0;i<10;i++){ const a=Math.PI/5*i - Math.PI/2; const r=i%2?4.8:12; p+=(i?'L':'M')+(x+r*Math.cos(a)).toFixed(1)+','+(y+r*Math.sin(a)).toFixed(1)+' '; }
       let g=`<path d="${p}Z" fill="#3a2b3a"/>`;
-      g+=`<circle cx="${x-3}" cy="${y-4}" r="3" fill="#fff" opacity=".95"/>`;
+      g+=`<ellipse cx="${x}" cy="${y+2}" rx="4.6" ry="3.6" fill="${eye.swatch}" opacity=".9"/>`;
+      g+=`<circle cx="${x-3.4}" cy="${y-4.4}" r="2.8" fill="#fff" opacity=".95"/>`;
+      g+=lash(x,y,side);
       return g;
     }
-    const rx=k==='e2'?9:10, ry=k==='e2'?11:12.5;
-    let g=`<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" fill="#fff"/>`;
-    g+=`<ellipse cx="${x}" cy="${y+1}" rx="${rx-1.5}" ry="${ry-2}" fill="${eye.swatch}"/>`;
-    g+=`<circle cx="${x}" cy="${y+2}" r="5.5" fill="#3a2b3a"/>`;
-    g+=`<circle cx="${x-3.2}" cy="${y-4}" r="3.2" fill="#fff"/>`;
-    g+=`<circle cx="${x+2.6}" cy="${y+2.5}" r="1.6" fill="#fff" opacity=".85"/>`;
+    const ry = k==='e2'?11:13.5;
+    let g=`<ellipse cx="${x}" cy="${y}" rx="11.5" ry="${ry}" fill="#fff"/>`;
+    g+=`<ellipse cx="${x}" cy="${y}" rx="9.5" ry="${ry-2}" fill="#3a2b3a"/>`;
+    g+=`<ellipse cx="${x}" cy="${y+1.5}" rx="7.6" ry="${ry-4}" fill="${eye.swatch}"/>`;
+    g+=`<ellipse cx="${x}" cy="${y+2}" rx="3.8" ry="${ry-7.5}" fill="#241a2e"/>`;
+    g+=`<circle cx="${x-3.4}" cy="${y-4.5}" r="3.3" fill="#fff"/>`;
+    g+=`<circle cx="${x+3.4}" cy="${y+3.8}" r="1.7" fill="#fff" opacity=".85"/>`;
+    g+=`<path d="M${x-11},${y-9} Q${x},${y-16} ${x+11},${y-9}" stroke="#3a2b3a" stroke-width="0.8" fill="none" stroke-linecap="round"/>`;
+    if(li.id!=='l1'){
+      g+= li.id==='l2'
+        ? `<path d="M${x-11},${y-10} Q${x+side*4},${y-17} ${x+side*13},${y-13}" stroke="#2a1f33" stroke-width="1.15" fill="none" stroke-linecap="round"/>`
+        : `<path d="M${x-11},${y-10} Q${x-side*2},${y-16} ${x-side*11},${y-12}" stroke="#2a1f33" stroke-width="1.9" fill="none" stroke-linecap="round"/>`;
+    }
+    // 卧蚕：眼下那条软软的微笑弧
+    g+=`<path d="M${x-8},${y+ry+2.5} Q${x},${y+ry+6.5} ${x+8},${y+ry+2.5}" stroke="#ffc9dd" stroke-width="1.15" fill="none" stroke-linecap="round" opacity=".8"/>`;
+    // 小星星闪光点缀在眼角，水汪汪
+    g+=`<path d="M${x+side*8.5},${y-ry+3} l1.2,2.6 2.8,.4 -2,2 .4,2.8 -2.4,-1.4 -2.4,1.4 .4,-2.8 -2,-2 2.8,-.4 Z" fill="#fff" opacity=".8"/>`;
+    g+=lash(x,y,side);
     return g;
   };
   [EL,ER].forEach(([x,y])=>{ s+=eyeShape(x,y,eye.id); });
-  // 上眼线/睫毛：仅在选了化妆款式时显示，默认保持干净
-  if(li.id!=='l1'){
-    [EL,ER].forEach(([x,y])=>{ if(li.id==='l2') s+=`<path d="M${x-11},${y-11} Q${x},${y-16} ${x+11},${y-11}" stroke="#2a1f33" stroke-width="2.8" fill="none" stroke-linecap="round"/>`; else s+=`<path d="M${x-10},${y-10} Q${x},${y-15} ${x+10},${y-11}" stroke="#2a1f33" stroke-width="2.6" fill="none" stroke-linecap="round"/>`; });
+  // 鼻尖小点
+  s+=`<path d="M129,139 Q130,141 131,139" stroke="#eeb494" stroke-width="0.8" fill="none" stroke-linecap="round"/>`;
+  // 小嘴（按唇色填充的微笑，含 Q130,154）
+  s+=`<path d="M122,149 Q130,158 138,149 Q130,154 122,149 Z" fill="${lp.swatch}"/>`;
+  s+=`<path d="M123,149 Q130,156 137,149" stroke="${lp.swatch}" stroke-width="0.8" fill="none" stroke-linecap="round"/>`;
+  // 嘴唇果冻高光
+  s+=`<path d="M126,151.5 Q130,154.5 134,151.5" stroke="#fff" stroke-width="1.15" fill="none" stroke-linecap="round" opacity=".65"/>`;
+  // 耳饰（挂在耳朵 x=71/189 处）
+  if(er.id!=='r0'){
+    const ec = er.id==='r1'?'#ffffff':er.id==='r2'?'#ffd95e':'#ff8fb0';
+    [71,189].forEach(x=>{
+      if(er.id==='r2') s+=`<path d="M${x},124 l2.4,4.6 5,.6 -3.6,3.4 1,5 -4.8,-2.6 -4.8,2.6 1,-5 -3.6,-3.4 5,-.6 Z" fill="${ec}" stroke="#d9b8c8" stroke-width=".6"/>`;
+      else if(er.id==='r3') s+=`<path d="M${x},126 C${x-5},126 ${x-5},134 ${x},134 C${x+5},134 ${x+5},126 ${x},126 Z" fill="${ec}" stroke="#e88aa8" stroke-width=".6"/>`;
+      else s+=`<circle cx="${x}" cy="127" r="3.6" fill="${ec}" stroke="#e8ccd8" stroke-width=".7"/>`;
+    });
   }
-  // 鼻子省略，保持脸部干净
-  // 小嘴（按唇色填充的小微笑）
-  s+=`<path d="M121,150 Q130,160 139,150 Q130,155 121,150 Z" fill="${lp.swatch}"/>`;
-  s+=`<path d="M121,150 Q130,156 139,150" stroke="${lp.swatch}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`;
-  // 耳饰（挂在耳朵 x=72/188 处）
-  if(er.id!=='r0'){ const ec=er.id==='r1'?'#ffffff':er.id==='r2'?'#ffd95e':'#ff8fb0'; [72,188].forEach(x=>{ if(er.id==='r2') s+=`<path d="M${x},${120} l2,4 4,.5 -3,3 1,4 -4,-2 -4,2 1,-4 -3,-3 4,-.5 Z" fill="${ec}" stroke="#caa" stroke-width=".5"/>`; else if(er.id==='r3') s+=`<path d="M${x},${122} C${x-5},${122} ${x-5},${130} ${x},${130} C${x+5},${130} ${x+5},${122} ${x},${122} Z" fill="${ec}" stroke="#e07" stroke-width=".5"/>`; else s+=`<circle cx="${x}" cy="${124}" r="3.5" fill="${ec}" stroke="#e8d" stroke-width=".6"/>`; }); }
   return s;
 }
 function gdDollSvg(){
   const h=girlDress.curHair, c=girlDress.curClothes, s=girlDress.curShoes;
   const e=girlDress.curEye, sh=girlDress.curShadow, li=girlDress.curLiner, lp=girlDress.curLip, er=girlDress.curEar, ht=girlDress.curHat, bg=girlDress.curBag;
-  const inner = baseLegs()+drawShoes(s)+baseTorso()+hairBack(h)+baseHead()+hairFront(h)+drawClothes(c)+featFace({eye:e,shadow:sh,liner:li,lip:lp,ear:er})+drawHat(ht)+drawBag(bg);
-  // 装饰小星星：让整体画面更灵动（四角闪光）
+  const inner = baseLegs()+drawShoes(s)+baseTorso()+hairBack(h)+baseHead()+hairFront(h, ht!=='h0'||h==='h1')+drawHands()+drawClothes(c)+featFace({eye:e,shadow:sh,liner:li,lip:lp,ear:er})+drawHat(ht)+drawBag(bg);
+  // 梦幻舞台：渐变背景 + 柔色圆 + 地面投影 + 闪光星星与爱心
+  const stage = `<defs><radialGradient id="gdDollBg" cx="50%" cy="30%" r="85%"><stop offset="0%" stop-color="#fffdfe"/><stop offset="55%" stop-color="#fff0f7"/><stop offset="100%" stop-color="#ffe3ef"/></radialGradient></defs>
+    <rect width="${FIGW}" height="${FIGH}" fill="url(#gdDollBg)"/>
+    <circle cx="46" cy="60" r="26" fill="#ffd9ea" opacity=".5"/>
+    <circle cx="216" cy="96" r="18" fill="#e8d9ff" opacity=".5"/>
+    <circle cx="222" cy="330" r="24" fill="#d9f0ff" opacity=".45"/>
+    <circle cx="38" cy="300" r="16" fill="#fff3c9" opacity=".5"/>
+    <ellipse cx="130" cy="455" rx="64" ry="10" fill="#f0b9d2" opacity=".4"/>`;
   const sp=(x,y,r,op)=>`<path d="M${x},${y-r} Q${x},${y} ${x+r},${y} Q${x},${y} ${x},${y+r} Q${x},${y} ${x-r},${y} Q${x},${y} ${x},${y-r} Z" fill="#ffd95e" opacity="${op}"/>`;
-  return P(`0 0 ${FIGW} ${FIGH}`, inner + sp(54,94,6,.85) + sp(208,150,4.5,.6) + sp(118,420,5,.7), 'girl-doll');
+  const heart=(x,y,s2,op)=>`<path d="M${x},${y+s2*0.85} C${x-s2},${y-0.1*s2} ${x-s2*0.65},${y-s2} ${x},${y-s2*0.3} C${x+s2*0.65},${y-s2} ${x+s2},${y-0.1*s2} ${x},${y+s2*0.85} Z" fill="#ff9ec4" opacity="${op}"/>`;
+  return P(`0 0 ${FIGW} ${FIGH}`, stage + inner + sp(48,88,6,.85) + sp(212,146,4.5,.6) + sp(96,432,4,.55) + sp(196,428,5,.7) + heart(34,150,9,.7) + heart(228,200,7,.6) + heart(206,64,6,.7) + heart(58,236,5.5,.5) + heart(204,408,5.5,.5) + sp(26,214,3.5,.5) + `<circle cx="188" cy="52" r="8" fill="none" stroke="#ffd9ea" stroke-width="1.9" opacity=".85"/><circle cx="42" cy="366" r="7" fill="none" stroke="#e8d9ff" stroke-width="1.9" opacity=".8"/><circle cx="224" cy="266" r="5.5" fill="none" stroke="#fff3c9" stroke-width="1.15" opacity=".85"/>`, 'girl-doll');
 }
 function gdPartSvg(key,id){
-  if(key==='hair'){ return P('70 50 120 140', baseHead()+hairBack(id)+hairFront(id), 'girl-thumb'); }
-  if(key==='clothes'){ return P('80 186 100 152', baseTorso()+drawClothes(id), 'girl-thumb'); }
+  if(key==='hair'){ return P('70 18 120 172', baseHead()+hairBack(id)+hairFront(id, id==='h1'), 'girl-thumb'); }
+  if(key==='clothes'){ return P('62 186 136 152', baseTorso()+drawHands()+drawClothes(id), 'girl-thumb'); }
   if(key==='shoes'){ return P('92 300 96 168', baseLegs()+drawShoes(id), 'girl-thumb'); }
-  if(key==='hat'){ return P('70 36 120 150', baseHead()+drawHat(id), 'girl-thumb'); }
-  if(key==='bag'){ return P('60 50 150 320', baseHead()+baseTorso()+baseLegs()+drawBag(id), 'girl-thumb'); }
+  if(key==='hat'){ return P('70 24 120 150', baseHead()+drawHat(id), 'girl-thumb'); }
+  if(key==='bag'){ return P('60 50 150 320', baseHead()+baseTorso()+drawHands()+baseLegs()+drawBag(id), 'girl-thumb'); }
   const f = { eye:'e1', shadow:'s1', liner:'l1', lip:'p1', ear:'r0' };
   f[key]=id;
   return P('74 56 112 132', baseHead()+featFace(f), 'girl-thumb');
 }
+
 /* ---- 玩法与收集：可爱度评分 / 每日任务 / 图鉴 ---- */
 const GD_DAILY = [
   { id:'hat',    icon:'🎀', text:'今天戴上一顶可爱的帽子吧！',   ok:g=>g.curHat!=='h0' },
