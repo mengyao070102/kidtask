@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609120" />
+<meta name="build-version" content="202609121" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -3455,7 +3455,7 @@ function taskBlock(t, date, confirmMode, simple){
     settleTaskTimer(t);
     setTaskDayDone(t, d ? fmtISO(d) : null, true);   // 按天记录「完成」
     setTaskCancel(t, false, t.reason || '');
-    save(); render(); showEncourage(t);
+    save(); render(); showEncourage(t); refreshBadges();
   };
   const doUncomplete = ()=>{
     // 撤销完成：按天记录「撤销」，其余天的完成历史保留；该撤销会同步到其它设备
@@ -4019,6 +4019,19 @@ function checkinHtml(){
     <button class="btn primary" id="checkinBtn">打卡 +1 积分</button>
   </div>`;
 }
+/* ---- 完成勋章统计口径（与积分/星星同源，全部基于 dayOps 真相 taskDoneDays） ---- */
+function totalDoneAll(){ let s=0; tasks.forEach(t=>{ try{ s+=taskDoneCount(t); }catch(e){} }); return s; }
+function doneCountType(tp){ let s=0; tasks.forEach(t=>{ if(t && t.type===tp){ try{ s+=taskDoneCount(t); }catch(e){} } }); return s; }
+function doneCountOnDay(iso){ let n=0; tasks.forEach(t=>{ try{ if(taskDoneDays(t).indexOf(iso)>=0) n++; }catch(e){} }); return n; }
+function doneBestDay(){ let best=0; const days={}; tasks.forEach(t=>{ try{ taskDoneDays(t).forEach(d=>{ days[d]=(days[d]||0)+1; }); }catch(e){} }); for(const k in days){ if(days[k]>best) best=days[k]; } return best; }
+function doneLast7(){ let n=0; for(let i=0;i<7;i++){ const d=new Date(); d.setDate(d.getDate()-i); n+=doneCountOnDay(fmtISO(d)); } return n; }
+function doneRunDays(){
+  /* 连续完成天数：从今天往回数每天都有完成；今天还没完成则从昨天开始数（不算断签） */
+  let start = doneCountOnDay(fmtISO(new Date())) > 0 ? 0 : 1;
+  let run = 0;
+  for(let i=start;i<400;i++){ const d=new Date(); d.setDate(d.getDate()-i); if(doneCountOnDay(fmtISO(d))>0) run++; else break; }
+  return run;
+}
 /* 徽章按主题分组：打卡 → 学习 → 任务 → 积分星星 → 亲子创作 → 宠物庄园。
    ⚠️ 新增徽章时 test 里引用的变量可能尚未初始化（BADGES 定义早于 pets/manor 等），
       所以统一走 safeBadgeTest 包 try/catch，单个条件出错不会拖垮整面徽章墙。 */
@@ -4035,10 +4048,18 @@ const BADGES = [
   { id:'math100',emoji:'🥇',name:'计算王者',   cond:'口算累计 100 题', test:()=>mathRec.total>=100, g:'📖 学习练习' },
   { id:'adv',   emoji:'💡', name:'知识小达人', cond:'读完今日知识 1 次', test:()=> knowReadToday(), g:'📖 学习练习' },
   { id:'know7', emoji:'📚', name:'知识小行家', cond:'累计读完 7 天每日知识', test:()=>Object.keys(loadKnowRead()||{}).length>=7, g:'📖 学习练习' },
-  /* 任务完成 */
-  { id:'task',  emoji:'📖', name:'学习小博士', cond:'完成任务 10 个',  test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=10, g:'✅ 任务完成' },
-  { id:'task30',emoji:'🎯', name:'任务达人',   cond:'完成任务 30 个',  test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=30, g:'✅ 任务完成' },
-  { id:'task100',emoji:'👑',name:'任务大师',   cond:'完成任务 100 个', test:()=>tasks.filter(t=>t.done&&!t.cancelled).length>=100, g:'✅ 任务完成' },
+  /* 任务完成（口径：dayOps 真相累计完成次数，重复任务每天 1 次、取消不清历史） */
+  { id:'task',  emoji:'📖', name:'学习小博士', cond:'完成任务 10 次',  test:()=>totalDoneAll()>=10, g:'✅ 任务完成' },
+  { id:'task30',emoji:'🎯', name:'任务达人',   cond:'完成任务 30 次',  test:()=>totalDoneAll()>=30, g:'✅ 任务完成' },
+  { id:'task100',emoji:'👑',name:'任务大师',   cond:'完成任务 100 次', test:()=>totalDoneAll()>=100, g:'✅ 任务完成' },
+  { id:'task200',emoji:'🚀',name:'任务火箭',   cond:'完成任务 200 次', test:()=>totalDoneAll()>=200, g:'✅ 任务完成' },
+  { id:'day3',  emoji:'⚡', name:'活力小闪电', cond:'单日完成 3 个任务', test:()=>doneBestDay()>=3, g:'✅ 任务完成' },
+  { id:'day5',  emoji:'🔥', name:'全力以赴',   cond:'单日完成 5 个任务', test:()=>doneBestDay()>=5, g:'✅ 任务完成' },
+  { id:'run3',  emoji:'🌈', name:'三天小连击', cond:'连续 3 天都有完成任务', test:()=>doneRunDays()>=3, g:'✅ 任务完成' },
+  { id:'run7',  emoji:'🌠', name:'一周不断更', cond:'连续 7 天都有完成任务', test:()=>doneRunDays()>=7, g:'✅ 任务完成' },
+  { id:'wk15',  emoji:'🗓️', name:'周周小劳模', cond:'最近 7 天完成 15 次', test:()=>doneLast7()>=15, g:'✅ 任务完成' },
+  { id:'sch10', emoji:'🏫', name:'校园之星',   cond:'校内任务累计完成 10 次', test:()=>doneCountType('school')>=10, g:'✅ 任务完成' },
+  { id:'out10', emoji:'🏠', name:'居家小帮手', cond:'家庭任务累计完成 10 次', test:()=>doneCountType('outside')>=10, g:'✅ 任务完成' },
   /* 积分与星星 */
   { id:'pts',   emoji:'💎', name:'积分小富豪', cond:'积分余额 100',    test:()=>pointBalance()>=100, g:'💎 积分星星' },
   { id:'pts300',emoji:'💰', name:'积分大富豪', cond:'积分余额 300',    test:()=>pointBalance()>=300, g:'💎 积分星星' },
@@ -10192,7 +10213,7 @@ function endTaskTimer(t){            // 点击「结束」：停止计时 + 完�
   settleTaskTimer(t);
   setTaskDayDone(t, fmtISO(todayInfo().date), true);   // 按天记录「完成」（带逻辑时钟，撤销才能跨端同步）
   setTaskCancel(t, false, t.reason || '');             // 完成即处于非取消态
-  save(); render(); showEncourage(t);   // showEncourage 已含「本次用时」
+  save(); render(); showEncourage(t); refreshBadges();   // showEncourage 已含「本次用时」
 }
 function taskCard(t, date){
   const el = document.createElement('div');
@@ -10255,7 +10276,7 @@ function taskCard(t, date){
       settleTaskTimer(t);
       setTaskDayDone(t, d, true);                    // d = 卡片所在日期；无日期上下文时按今天
       setTaskCancel(t, false, t.reason || '');
-      save(); render(); showEncourage(t);
+      save(); render(); showEncourage(t); refreshBadges();
     };
     el.querySelector('.cancel').onclick = ()=>{
       promptModal({
