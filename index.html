@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609119" />
+<meta name="build-version" content="202609120" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -2236,7 +2236,7 @@
     border:2px solid #fff;
   }
   .task-block .tb-flag.todo { background:#ff5d7e; color:#fff; font-size:15px; padding-bottom:1px; }
-  .task-block .tb-flag.ok { background:#ffffff; font-size:14px; }
+  .task-block .tb-flag.ok { background:#f0fbf5; color:#6fbf92; font-size:15px; font-weight:900; border-color:#cdeedd; }
   .task-block .tb-flag.canc { background:#efefef; color:#b94a4a; }
   .task-block:active { transform:scale(.96); box-shadow:0 2px 6px rgba(180,120,160,.3); }
   .task-block.done { filter:saturate(.85); }
@@ -2719,7 +2719,30 @@ function deriveTaskCancel(t){
   if(Number(op.c) === 1){ t.cancelled = true; if(op.reason != null) t.reason = op.reason; }
   else { t.cancelled = false; }
 }
-function starCount(){ const base = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + extra.stars; const spent = Math.max((dice && dice.used) || 0, starLog.length); return Math.max(0, base - spent); }
+function starCount(){
+  const base = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + (Number(extra.stars)||0);
+  const spent = Math.max((dice && dice.used) || 0, starLog.length);
+  /* 数据漂移自校正：当「已消耗计数」大于「完成基数」（多因历史数据迁移/重置/测试数据导致）时，
+     完成新任务也看不到星星变化（被 max(0,…) 钉住）。
+     此时改用「锚点法」：以最近一次摇骰记录里的 remain（摇完那一刻的真实余额）为基准，
+     加上那之后新获得的星星——dayOps.at 晚于锚点 ts 的完成次数 + 锚点后的手工调星(extraLog star)。
+     干净数据下 spent<=base，走原公式，行为与历史完全一致。 */
+  const top = starLog.length ? starLog[0] : null;
+  if(top && top.remain != null && spent > base){
+    const anchorTs = Number(top.ts)||0;
+    let after = 0;
+    for(const t of tasks){
+      if(!t) continue;
+      const ops = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps : null;
+      if(!ops) continue;
+      for(const d in ops){ const o = ops[d]; if(o && Number(o.d)===1 && (Number(o.at)||0) > anchorTs) after++; }
+    }
+    let starAdj = 0;
+    for(const r of extraLog){ if(r && r.kind==='star' && (Number(r.at)||0) > anchorTs) starAdj += (Number(r.delta)||0); }
+    return Math.max(0, (Number(top.remain)||0) + after + starAdj);
+  }
+  return Math.max(0, base - spent);
+}
 /* 积分按「完成天数 × 每份分值」累计：周期任务每天完成各得 1 份（如 1~5 号每天完成、每份 1 分 = 5 分）；
    一次性任务最多完成 1 天 = 1 份。与分页统计 buildEarnedMap/todayEarnedInfo（按天归属）口径统一。
    撤销某天完成会减少对应天数，积分同步回退；兑换消耗（pending/approved）从余额中扣减。 */
@@ -3418,7 +3441,7 @@ function taskBlock(t, date, confirmMode, simple){
   if(doneTimeHtml) b.classList.add('has-time');
   // 左上角状态角标：未完成=红色叹号❗、已完成=对勾圆圈☑️、已取消=灰✕
   const flagCls = isDone?'ok':(isCancelled?'canc':'todo');
-  const flagTxt = isDone?'☑️':(isCancelled?'✕':'!');
+  const flagTxt = isDone?'✓':(isCancelled?'✕':'!');
   b.innerHTML = `<span class="tb-flag ${flagCls}">${flagTxt}</span><span class="tb-name">${esc(t.title)}</span>` + metaHtml + timerHtml + doneTimeHtml;
   if(!isCancelled){
     const tb = b.querySelector('[data-timerbtn]');
