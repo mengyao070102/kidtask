@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609110" />
+<meta name="build-version" content="202609111" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -11913,6 +11913,24 @@ let childEventLog = loadChildEventLog();
 let childEventSeen = new Set(childEventLog.map(e=>String(e&&e.id)));
 function loadChildEventLog(){ try { const a = JSON.parse(localStorage.getItem(CEVT_KEY)); if(Array.isArray(a)) return a; } catch(e){} return []; }
 function saveChildEventLog(){ if(childEventLog.length>500) childEventLog = childEventLog.slice(-500); try { localStorage.setItem(CEVT_KEY, JSON.stringify(childEventLog)); } catch(e){} }
+/* 合并孩子端行为事件（按 id 并集去重），用于：① 孩子端本地先留存（断网也不丢）② 随同步通道补推后家长端合并 ③ 实时 /evt 流到达时合并。
+   返回是否发生了新增，便于上层决定是否重渲染。 */
+function mergeChildEvents(arr){
+  if(!Array.isArray(arr) || !arr.length) return false;
+  let changed = false;
+  for(const obj of arr){
+    if(!obj || obj.type !== 'cevt' || obj.src !== 'child') continue;
+    if(childEventSeen.has(String(obj.id))) continue;
+    childEventSeen.add(String(obj.id));
+    childEventLog.push(obj);
+    changed = true;
+  }
+  if(changed){
+    if(childEventLog.length > 500) childEventLog = childEventLog.slice(-500);
+    saveChildEventLog();
+  }
+  return changed;
+}
 
 function getFamilyCode(){
   let code = '';
@@ -12056,6 +12074,8 @@ function collectSyncState(){
     extra,
     extraLog,
     starLog,
+    /* 孩子端行为事件流（孩子动态时间线的数据来源）：孩子端本地留存后随同步通道补推，家长端按 id 并集合并，断网也不丢 */
+    childEvents: childEventLog,
     /* 打卡只同步孩子端的记录：家长端快照不带 checkin，避免家长端打卡覆盖孩子的连续记录 */
     checkin: deviceRole === 'child' ? checkin : undefined,
     earnedBadges,
@@ -12117,9 +12137,10 @@ function handleSyncMessage(topic, payload){
    仅孩子端发布自己的事件；家长端消费并重放派生，孩子端自身忽略（不自我回写）。 */
 function publishChildEvent(ev){
   if(deviceRole !== 'child') return;                 // 仅孩子端发布
-  if(!syncConnected || !mqttClient) return;
   const id = senderId + '-' + bumpSyncTs() + '-' + Math.random().toString(36).slice(2,5);
   const msg = { type:'cevt', src:'child', id, ts: logicalTs, ev };
+  mergeChildEvents([msg]);                            // 本地先留存：断网也不丢，之后随 sync 通道补推给家长端
+  if(!syncConnected || !mqttClient) return;
   try { mqttClient.publish(evtTopic(), JSON.stringify(msg), { qos:1 }); } catch(e){}
 }
 function handleChildEvent(payload){
@@ -12127,9 +12148,7 @@ function handleChildEvent(payload){
   try { obj = JSON.parse(typeof payload === 'string' ? payload : payload.toString()); } catch(e){ return; }
   if(!obj || obj.type !== 'cevt' || obj.src !== 'child') return;
   if(deviceRole === 'child') return;                 // 孩子端不消费自己的事件（避免自我回写）
-  if(childEventSeen.has(String(obj.id))) return;     // 去重：QoS1 重复投递只应用一次
-  childEventSeen.add(String(obj.id));
-  childEventLog.push(obj); saveChildEventLog();
+  if(!mergeChildEvents([obj])) return;               // 去重：已收到过（实时 /evt 或同步补推）则跳过重放
   const ev = obj.ev || {};
   try {
     if(ev.kind === 'taskDone'){
@@ -12280,6 +12299,8 @@ function applySyncState(obj){
       try{ localStorage.setItem(BADGE_KEY, JSON.stringify(earnedBadges)); }catch(e){}
     }
     if(obj.knowledgeType==='history' || obj.knowledgeType==='story' || obj.knowledgeType==='science'){ knowledgeType = obj.knowledgeType; try{ localStorage.setItem(KNOWLEDGE_TYPE_KEY, knowledgeType); }catch(e){} }
+    /* 孩子端行为事件流（家长端「孩子动态」时间线）：按 id 并集合并去重，实时 /evt 与同步补推都走这里，断网也不丢 */
+    if(Array.isArray(obj.childEvents)){ mergeChildEvents(obj.childEvents); }
     if(Array.isArray(obj.redeemed)){ // 积分兑换申请/记录（含待审核 pending、已批准 approved）：按 rid 合并（同 rid 覆盖保留最新整条），三端各申请各的不互相删除
       const map = {};
       redeemed.forEach(r=>{ if(r && r.rid) map[String(r.rid)] = r.status ? r : Object.assign({status:'approved'}, r); });
