@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609109" />
+<meta name="build-version" content="202609110" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -1846,6 +1846,7 @@
   .rm-save:active { transform:translateY(2px); }
   .rm-note { width:100%; max-width:340px; }
   .rm-tip { color:#b08fa0; font-size:13px; font-weight:600; }
+  .rm-tip.current-rule { display:inline-block; margin-top:2px; padding:6px 10px; background:#fff4f8; border:1px dashed #ffb3cf; border-radius:10px; color:#d63d7a; font-weight:700; }
   .rm-limit .rm-label { min-width:auto; }
   .rm-log-head { align-items:center; }
   .rm-log-head .section-h { margin-bottom:0; }
@@ -6148,8 +6149,10 @@ function rpsPlay(me){
 
 /* 摇骰子：每局先生成 6 个数（低/高区间按局数变化），手动排序后摇骰选中对应序号，求和并显示明细 */
 const DICE_CFG_KEY = 'kidtask_dice_cfg_v1';
+const DICE_CFG_TS_KEY = 'kidtask_dice_cfg_ts';
 const DICE_KEY = 'kidtask_dice_v1';
 let diceCfg = loadDiceCfg();
+let diceCfgTs = Number(localStorage.getItem(DICE_CFG_TS_KEY)) || 0;  // 同步收敛用：时间戳较大者胜
 let dice = loadDice();
 let diceSel = null; // 手动排序时选中的格子序号
 function loadDiceCfg(){
@@ -6164,6 +6167,19 @@ function loadDiceCfg(){
   return { lowMin:0.2, lowMax:0.7, highMin:1, highMax:20, bigMin:10, bigFromRound:10 };
 }
 function saveDiceCfg(){ localStorage.setItem(DICE_CFG_KEY, JSON.stringify(diceCfg)); }
+/* 推进 diceCfg 同步时间戳（与 timetable/pin 一致：本地单调+真实时钟，跨设备时钟不一致也不误判） */
+function touchDiceCfgTs(){
+  diceCfgTs = Math.max(diceCfgTs + 1, Date.now());
+  try{ localStorage.setItem(DICE_CFG_TS_KEY, String(diceCfgTs)); }catch(e){}
+  try{ logicalTs = Math.max(logicalTs, diceCfgTs); localStorage.setItem('kidtask_sync_ts', String(logicalTs)); }catch(e){}
+}
+/* 家长设置页「当前规则」显示：把当前摇骰子区间数值显示出来，便于核对 */
+function diceCfgCurrentText(){
+  return '当前规则：低区间 ' + fmtDiceVal(diceCfg.lowMin) + '–' + fmtDiceVal(diceCfg.lowMax)
+       + '，高区间 ' + fmtDiceVal(diceCfg.highMin) + '–' + fmtDiceVal(diceCfg.highMax)
+       + '；第 ' + diceCfg.bigFromRound + ' 局起才出现 ≥' + diceCfg.bigMin + ' 的大数。';
+}
+function updateDiceCfgTip(){ const el = document.getElementById('diceCfgTip'); if(el) el.textContent = diceCfgCurrentText(); }
 function loadDice(){
   try { const o = JSON.parse(localStorage.getItem(DICE_KEY));
     if(o && typeof o==='object') return {
@@ -11472,7 +11488,10 @@ function renderParent(){
           </div>
           <div class="rm-item">
             <button class="rm-btn rm-save" id="saveDiceCfgBtn">💾 保存区间</button>
-            <span class="rm-tip">低区间生成小数（如 0.2-0.7），高区间生成整数（如 1-20）。大数规则：第「大数局次」局之前出现的高位数都小于「大数门槛」，达到该局次后才可能摇到 10 以上的大数。</span>
+            <span class="rm-tip current-rule" id="diceCfgTip"></span>
+          </div>
+          <div class="rm-item">
+            <span class="rm-tip">低区间生成小数（如 0.2-0.7），高区间生成整数（如 1-20）。大数规则：第「大数局次」局之前出现的高位数都小于「大数门槛」，达到该局次后才可能摇到 10 以上的大数。本设置修改后会自动同步到孩子端和其他家长端。</span>
           </div>
         </div>
       </div>
@@ -11690,9 +11709,13 @@ function renderParent(){
     const bf = parseInt(main.querySelector('#diceBigFrom').value,10);
     if(isNaN(bm)||bm<1){ showToast('「大数门槛」请填 ≥1 的整数哦～'); return; }
     if(isNaN(bf)||bf<1){ showToast('「大数局次」请填 ≥1 的整数哦～'); return; }
-    diceCfg = { lowMin:lm, lowMax:lx, highMin:hm, highMax:hx, bigMin:bm, bigFromRound:bf }; saveDiceCfg();
-    showToast('✅ 摇骰子区间已保存（第 '+bf+' 局起才出现 ≥'+bm+' 的大数）');
+    diceCfg = { lowMin:lm, lowMax:lx, highMin:hm, highMax:hx, bigMin:bm, bigFromRound:bf }; saveDiceCfg(); touchDiceCfgTs();
+    updateDiceCfgTip();
+    try { pushSync(true); } catch(e){}   // 立即把新区间同步到孩子端和其他家长端
+    showToast('✅ 摇骰子区间已保存（第 '+bf+' 局起才出现 ≥'+bm+' 的大数），已同步各端');
   };
+  /* 进入家长设置页即显示当前摇骰子区间数值（未改动时也可见） */
+  updateDiceCfgTip();
   const spc = main.querySelector('#savePetCfgBtn');
   if(spc) spc.onclick = ()=>{
     const un = parseInt(main.querySelector('#petUnlockNeed').value,10);
@@ -12038,6 +12061,8 @@ function collectSyncState(){
     earnedBadges,
     /* 课程表（家长排课）：与其它家长配置一样按 ts 取较新收敛 */
     timetable, ttTs,
+    /* 摇骰子区间设置：家长配置，按 diceCfgTs 取较新收敛（最后编辑者赢） */
+    diceCfg, diceCfgTs,
     knowledgeType,
     redeemed,
     /* 历史 / 累积数据（多端合并，不互相覆盖）：
@@ -12048,7 +12073,7 @@ function collectSyncState(){
     knowRead: loadKnowRead(),
     bookList: bookList.slice(0, 30),      // 绘本最多同步 30 本，控制报文体积
     storyData
-    // 注：庄园/宠物/换装/小游戏(骰子/五子棋/石头剪刀布)及放松板块(relaxCfg/relaxUsage)按用户要求「纯本地、不同步」，故不在此发送
+    // 注：庄园/宠物/换装/小游戏(dice「游玩进度」/五子棋/石头剪刀布)及放松板块(relaxCfg/relaxUsage)按用户要求「纯本地、不同步」故不在此发送；diceCfg 区间设置已改为跨端同步（见上方 collectSyncState）
   };
 }
 
@@ -12222,7 +12247,22 @@ function applySyncState(obj){
         if(page === 'timetable'){ try{ renderTimetable(); }catch(e){} }
       }
     }
-    /* 注：gomoku / rps / dice / diceCfg 等小游戏按用户要求纯本地、不同步，不再应用远端 */
+    /* 摇骰子区间设置：按 diceCfgTs 取较新收敛（最后编辑者赢），与 timetable/pin 一致 */
+    if(obj.diceCfg && typeof obj.diceCfg === 'object'){
+      const _dt = Number(obj.diceCfgTs)||0;
+      if((_dt===0 && diceCfgTs===0) || _dt > diceCfgTs){
+        diceCfg = {
+          lowMin: Number(obj.diceCfg.lowMin)||0.2, lowMax: Number(obj.diceCfg.lowMax)||0.7,
+          highMin: Number(obj.diceCfg.highMin)||1, highMax: Number(obj.diceCfg.highMax)||20,
+          bigMin: Math.max(1, Number(obj.diceCfg.bigMin)||10), bigFromRound: Math.max(1, Number(obj.diceCfg.bigFromRound)||10)
+        };
+        saveDiceCfg();
+        if(_dt > diceCfgTs){ diceCfgTs = _dt; try{ localStorage.setItem(DICE_CFG_TS_KEY, String(diceCfgTs)); }catch(e){} }
+        if(page === 'games' && activeGame === 'dice'){ try{ renderDice(); }catch(e){} }  // 孩子端当前在摇骰子页则实时反映新区间
+        else if(page === 'manual'){ try{ updateDiceCfgTip(); }catch(e){} }              // 家长设置页则刷新「当前规则」显示
+      }
+    }
+    /* 注：gomoku / rps 等小游戏、dice「游玩进度」(kidtask_dice_v1：当前数字/已摇次数) 按用户要求纯本地、不同步；diceCfg 区间设置已改为跨端同步（见上） */
     if(Array.isArray(obj.starLog)){ // 星星使用明细（含摇骰子 −1⭐ 记录）：按 ts 合并去重，避免三端各玩各的互相覆盖
       const seen = new Set(starLog.map(e=>String(e&&e.ts)));
       obj.starLog.forEach(e=>{ if(e && e.ts && !seen.has(String(e.ts))){ starLog.push(e); seen.add(String(e.ts)); } });
