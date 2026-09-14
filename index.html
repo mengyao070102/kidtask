@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609112" />
+<meta name="build-version" content="202609113" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -2715,7 +2715,7 @@ function deriveTaskCancel(t){
   if(Number(op.c) === 1){ t.cancelled = true; if(op.reason != null) t.reason = op.reason; }
   else { t.cancelled = false; }
 }
-function starCount(){ const base = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + extra.stars; const spent = (dice && dice.used) ? dice.used : 0; return Math.max(0, base - spent); }
+function starCount(){ const base = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + extra.stars; const spent = Math.max((dice && dice.used) || 0, starLog.length); return Math.max(0, base - spent); }
 /* 积分按「完成天数 × 每份分值」累计：周期任务每天完成各得 1 份（如 1~5 号每天完成、每份 1 分 = 5 分）；
    一次性任务最多完成 1 天 = 1 份。与分页统计 buildEarnedMap/todayEarnedInfo（按天归属）口径统一。
    撤销某天完成会减少对应天数，积分同步回退；兑换消耗（pending/approved）从余额中扣减。 */
@@ -6007,11 +6007,6 @@ function renderGames(){
     </div>`;
   main.querySelectorAll('.game-card').forEach(c=>{
     c.onclick = ()=>{
-      /* 摇骰子是孩子的奖励游戏（消耗共享星星），家长端不允许进入玩耍，避免误扣孩子的星星 */
-      if(deviceRole==='parent' && c.dataset.g==='dice'){
-        showToast('🌈 摇骰子是孩子的奖励游戏，请在孩子端玩耍，家长端不会消耗星星哦～');
-        return;
-      }
       const inWin = relaxInWindow();
       if(relaxCfg.enabled){
         if(inWin===false){ showToast('⏰ 现在不是放松时间哦，'+relaxCfg.start+'–'+relaxCfg.end+' 才能玩～'); return; }
@@ -6417,8 +6412,6 @@ function renderDice(){
 }
 function shuffleArr(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=arr[i]; arr[i]=arr[j]; arr[j]=t; } }
 function rollDice(){
-  /* 家长端不可摇骰子（不消耗孩子的星星），双保险 */
-  if(deviceRole==='parent'){ showToast('🌈 摇骰子是孩子的奖励游戏，请在孩子端玩耍哦～'); return; }
   const stars = starCount();
   if(stars <= 0){ showToast('⭐ 星星不够啦，去完成「我的任务」赚星星，就能继续摇！'); return; }
   if(!dice.current || dice.current.length!==6){ dice.current = genDiceRound(dice.round); }
@@ -6426,13 +6419,14 @@ function rollDice(){
   const val = dice.current[face-1];
   dice.lastRound = dice.round; dice.lastFace = face; dice.lastVal = val;
   dice.details.push({ r:dice.round, idx:face, val:val });
-  dice.used++;   // 每摇一次消耗 1 颗星星（全局扣除）
+  dice.used++;   // 每摇一次消耗 1 颗星星（共享星星池，跨端同步）
   dice.round++;  // 每摇一次算一局
-  // 记录星星使用历史：每摇一次消耗 1 颗星星
-  starLog.unshift({ ts: Date.now(), date: fmtDateTime(new Date()), round: dice.lastRound, val: val, remain: starCount() });
+  // 记录星星使用历史：每摇一次消耗 1 颗星星（带唯一 id，便于跨端按 id 并集合并去重）
+  starLog.unshift({ id: senderId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), ts: Date.now(), date: fmtDateTime(new Date()), round: dice.lastRound, val: val, remain: starCount() });
   if(starLog.length > 1000) starLog.length = 1000;   // 上限 200→1000：保留更完整的星星使用历史
-  saveStarLog();
-  diceSel = null; saveDice(); renderDice();
+  saveStarLog(); saveDice();
+  pushSync(true);   // 立即把「已消耗星星」广播到全家，各端星星数保持一致
+  diceSel = null; renderDice();
 }
 
 /* 宠物养成：类型/性别选择 + 日常护理 + 装扮 + 升级进度 + 答题解锁（规则家长可自定义） */
@@ -12081,6 +12075,8 @@ function collectSyncState(){
     extra,
     extraLog,
     starLog,
+    /* 已消耗星星数（摇骰子花费）：单调计数，跨端按较大值合并，确保各端星星余额一致 */
+    diceUsed: dice.used,
     /* 孩子端行为事件流（孩子动态时间线的数据来源）：孩子端本地留存后随同步通道补推，家长端按 id 并集合并，断网也不丢 */
     childEvents: childEventLog,
     /* 打卡只同步孩子端的记录：家长端快照不带 checkin，避免家长端打卡覆盖孩子的连续记录 */
@@ -12100,7 +12096,7 @@ function collectSyncState(){
     knowRead: loadKnowRead(),
     bookList: bookList.slice(0, 30),      // 绘本最多同步 30 本，控制报文体积
     storyData
-    // 注：庄园/宠物/换装/小游戏(dice「游玩进度」/五子棋/石头剪刀布)及放松板块(relaxCfg/relaxUsage)按用户要求「纯本地、不同步」故不在此发送；diceCfg 区间设置已改为跨端同步（见上方 collectSyncState）
+    // 注：庄园/宠物/换装/小游戏(骰子「当前数字/已摇局数」游玩进度/五子棋/石头剪刀布)及放松板块(relaxCfg/relaxUsage)按用户要求「纯本地、不同步」故不在此发送；diceCfg 区间设置、diceUsed 已消耗星星数、starLog 已改为跨端同步（见上方 collectSyncState）
   };
 }
 
@@ -12288,14 +12284,16 @@ function applySyncState(obj){
         else if(page === 'manual'){ try{ updateDiceCfgTip(); }catch(e){} }              // 家长设置页则刷新「当前规则」显示
       }
     }
-    /* 注：gomoku / rps 等小游戏、dice「游玩进度」(kidtask_dice_v1：当前数字/已摇次数) 按用户要求纯本地、不同步；diceCfg 区间设置已改为跨端同步（见上） */
-    if(Array.isArray(obj.starLog)){ // 星星使用明细（含摇骰子 −1⭐ 记录）：按 ts 合并去重，避免三端各玩各的互相覆盖
-      const seen = new Set(starLog.map(e=>String(e&&e.ts)));
-      obj.starLog.forEach(e=>{ if(e && e.ts && !seen.has(String(e.ts))){ starLog.push(e); seen.add(String(e.ts)); } });
+    /* 注：gomoku / rps 等小游戏、dice「游玩进度」(kidtask_dice_v1：当前数字/已摇局数) 按用户要求纯本地、不同步；diceCfg 区间设置、diceUsed 已消耗星星数、starLog 已改为跨端同步（见上） */
+    if(Array.isArray(obj.starLog)){ // 星星使用明细（含摇骰子 −1⭐ 记录）：按唯一 id 并集合并去重，避免三端各玩各的互相覆盖、也避免同毫秒 ts 碰撞丢记录
+      const seen = new Set(starLog.map(e=>String(e&&(e.id||e.ts))));
+      obj.starLog.forEach(e=>{ if(e && (e.id||e.ts) && !seen.has(String(e.id||e.ts))){ starLog.push(e); seen.add(String(e.id||e.ts)); } });
       starLog.sort((a,b)=> (b.ts||0)-(a.ts||0));
       if(starLog.length>1000) starLog.length=1000;
       saveStarLog();
     }
+    /* 已消耗星星数（摇骰子花费）：单调计数，跨端取较大值合并（最后/最多者赢），保证各端星星余额一致 */
+    if(typeof obj.diceUsed === 'number' && obj.diceUsed > (dice.used||0)){ dice.used = obj.diceUsed; saveDice(); if(page==='games' && activeGame==='dice'){ try{ renderDice(); }catch(e){} } }
     /* 注：petCfg 随宠物一起纯本地、不同步 */
     if(obj.checkin && typeof obj.checkin==='object'){ checkin = { last:String(obj.checkin.last||''), streak:Number(obj.checkin.streak)||0, total:Number(obj.checkin.total)||0 }; try{ localStorage.setItem(CHECKIN_KEY, JSON.stringify(checkin)); }catch(e){} }
     /* 徽章按 id 并集（成就数据：三端各解锁不同徽章都应保留，不能 last-write-wins 丢） */
