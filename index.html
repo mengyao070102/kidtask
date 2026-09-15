@@ -7,7 +7,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609128" />
+<meta name="build-version" content="202609130" />
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#ff8fab" />
 <script>
   // 阻止触控板/移动端的双击与捏合缩放导致整页突然变大
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){
@@ -3305,6 +3307,7 @@ function normModelQ(q){
 const main = document.getElementById('main');
 let page = 'home';
 let allFilter = 'all';         // 我的任务筛选
+let ledgerRange = 'today';     // 家长审核页各流水的时间范围：today=今天 / 7d=近7天 / more=更多(全部)
 const openPanels = new Set(); // 家长审核页各功能模块的折叠展开状态（跨重渲染保持）
 let weekOffset = 0;            // 周视图偏移（0=本周）
 let selDayIdx = null;         // 当前选中的星期（0=周一…6=周日），null=今天
@@ -11507,9 +11510,17 @@ function pointLedger(){
   return rows.slice(0, 60);
 }
 /* 落地版方案B：家长端「孩子动态」时间线，由 childEventLog 派生（孩子端行为事件流，可审计） */
-function childFeedItems(){
-  if(!childEventLog || !childEventLog.length) return '<li class="r-empty">还没有收到孩子的动态，孩子在端上完成任务 / 赚分 / 得星后会实时出现在这里～</li>';
-  return childEventLog.slice().reverse().slice(0,30).map(e=>{
+/* 家长页流水时间范围：返回该范围的起始时间戳（more=0 表示不过滤） */
+function ledgerRangeStart(){
+  if(ledgerRange==='today'){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+  if(ledgerRange==='7d'){ const d=new Date(); d.setHours(0,0,0,0); return d.getTime()-6*86400000; }
+  return 0;
+}
+function childFeedItems(rangeStart){
+  const rs = Number(rangeStart)||0;
+  const src = (childEventLog||[]).filter(e=>!rs || (Number(e.ts)||0)>=rs);
+  if(!src.length) return '<li class="r-empty">'+(rs?'该时间段暂无孩子动态～':'还没有收到孩子的动态，孩子在端上完成任务 / 赚分 / 得星后会实时出现在这里～')+'</li>';
+  return src.slice().reverse().slice(0,30).map(e=>{
     const ev = e.ev||{}; const t = fmtDT(e.ts);
     let icon='📌', src='', delta='';
     if(ev.kind==='taskDone'){ icon = ev.done? '✅':'↩️'; src = (ev.done?'完成':'撤销')+'了任务（'+esc(ev.day||'')+'）'; }
@@ -11519,14 +11530,15 @@ function childFeedItems(){
   }).join('');
 }
 function renderParent(){
-  // 💎 积分明细：任务完成/家长调整/奖励兑换 汇总（日期·来源·得分）
-  const ptRows = pointLedger();
+  // 💎 积分明细：任务完成/家长调整/奖励兑换 汇总（日期·来源·得分）——按「今天/近7天/更多」过滤
+  const _rs = ledgerRangeStart();
+  const ptRows = pointLedger().filter(r=>!_rs || (Number(r.at)||0)>=_rs);
   const ptHtml = ptRows.length
     ? `<div class="ledger-head"><span>任务</span><span>积分</span><span>时间</span></div><ul class="rm-log">` + ptRows.map(r=>{
         const up = r.pts>0;
         return `<li class="rm-log-item"><span class="rl-icon">${up?'💎':'💸'}</span><span class="rl-src">${esc(r.src)}</span><span class="rl-delta ${up?'up':'down'}">${up?'+':'−'}${Math.abs(r.pts)} 积分</span><span class="rl-time">${fmtDT(r.at)}</span></li>`;
       }).join('') + `</ul>`
-    : `<div class="empty small"><span class="big">💎</span>暂无积分记录，完成任务后就会出现在这里～</div>`;
+    : `<div class="empty small"><span class="big">💎</span>${_rs?'该时间段暂无积分记录，可切到「更多」查看全部～':'暂无积分记录，完成任务后就会出现在这里～'}</div>`;
   const pendings = redeemed.filter(r=>r.status==='pending');
   const listHtml = pendings.length
     ? pendings.slice().reverse().map(r=>`
@@ -11542,8 +11554,9 @@ function renderParent(){
     : `<li class="r-empty">🎉 暂无待审核的兑换申请，孩子表现真好！</li>`;
   const approvedToday = redeemed.filter(r=>r.status==='approved').length;
   const usedP = extraUsedToday('point'), usedS = extraUsedToday('star');
-  const logHtml = extraLog.length
-    ? extraLog.slice(-20).reverse().map(r=>{
+  const _logs = extraLog.filter(r=>!_rs || (Number(r.at)||0)>=_rs);
+  const logHtml = _logs.length
+    ? _logs.slice(-20).reverse().map(r=>{
         const up = r.delta>0;
         return `<li class="rm-log-item">
           <span class="rl-icon">${r.kind==='point'?'💎':'⭐'}</span>
@@ -11552,7 +11565,7 @@ function renderParent(){
           <span class="rl-time">${new Date(r.at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
         </li>`;
       }).join('')
-    : '<li class="r-empty">暂无奖励记录，快去给孩子加分吧～</li>';
+    : '<li class="r-empty">'+(_rs?'该时间段暂无奖励记录，可切到「更多」查看全部～':'暂无奖励记录，快去给孩子加分吧～')+'</li>';
   main.innerHTML = `
     <div class="page-head">
       <h1 class="page-title">🛡️ 家长审核</h1>
@@ -11561,8 +11574,16 @@ function renderParent(){
     <p class="page-sub">这里可以审批孩子的奖励兑换申请、调整积分星星、管理任务和各类规则。当前已批准兑换 <b>${approvedToday}</b> 次。点击每个模块标题即可展开 / 收起。</p>
     <div class="parent-tip">🔐 本页需家长密码进入。<button class="link-btn" id="changePin">修改密码</button></div>
 
+    <div class="filter-row" id="ledgerRangeRow" style="margin-top:10px;">
+      <span style="font-size:12.5px;color:#85586c;align-self:center;margin-right:2px;">📅 流水范围</span>
+      <button class="filter-btn ${ledgerRange==='today'?'sel':''}" data-r="today">今天</button>
+      <button class="filter-btn ${ledgerRange==='7d'?'sel':''}" data-r="7d">近7天</button>
+      <button class="filter-btn ${ledgerRange==='more'?'sel':''}" data-r="more">更多</button>
+      <span style="font-size:11.5px;color:#9aa3b2;align-self:center;">（应用于下方各流水记录）</span>
+    </div>
+
     <div class="parent-tip" style="margin-top:12px;">🧒 <b>孩子动态</b>（实时事件流 · 仅孩子端产生，可审计）</div>
-    <ul class="rm-log">${childFeedItems()}</ul>
+    <ul class="rm-log">${childFeedItems(_rs)}</ul>
 
     <section class="collapse-panel" data-pid="mytasks" data-open="${openPanels.has('mytasks')?'true':'false'}">
       <button class="collapse-head" type="button" data-pid="mytasks"><span class="ch-title">💖 我的任务</span><span class="ch-chevron">▸</span></button>
@@ -11575,7 +11596,17 @@ function renderParent(){
           <button class="filter-btn ${allFilter==='cancelled'?'sel':''}" data-f="cancelled">取消</button>
         </div>
         <div class="task-list" id="list"></div>
+        <div class="backup-row" style="margin-top:8px;">
+          <button class="parent-entry" id="tplSaveBtn">💾 任务存为模板</button>
+          <button class="parent-entry" id="tplLoadBtn">📥 从模板载入</button>
+        </div>
+        <p class="diag-tip" style="color:#5a7fb0;font-size:12px;line-height:1.6;margin-top:4px;">💡 模板保存任务的名称/分值/周期等设置（不含完成记录），载入时会按原周期自动顺延到本周，适合每周重复布置任务。</p>
       </div>
+    </section>
+
+    <section class="collapse-panel" data-pid="weekly" data-open="${openPanels.has('weekly')?'true':'false'}">
+      <button class="collapse-head" type="button" data-pid="weekly"><span class="ch-title">📊 每周报告</span><span class="ch-chevron">▸</span></button>
+      <div class="collapse-body" id="weeklyBody">${weeklyReportHtml()}</div>
     </section>
 
     <section class="collapse-panel" data-pid="manual" data-open="${openPanels.has('manual')?'true':'false'}">
@@ -11676,7 +11707,7 @@ function renderParent(){
       <button class="collapse-head" type="button" data-pid="log"><span class="ch-title">📜 奖励记录</span><span class="ch-chevron">▸</span></button>
       <div class="collapse-body">
         <div class="page-head rm-log-head">
-          <h3 class="section-h" style="margin-bottom:0;">最近 ${Math.min(extraLog.length,20)} / 共 ${extraLog.length} 条</h3>
+          <h3 class="section-h" style="margin-bottom:0;">${_rs?'当前范围 ':''}最近 ${Math.min(_logs.length,20)} / 共 ${_logs.length} 条</h3>
           ${extraLog.length?'<button class="parent-entry back-btn" id="clearLogBtn">🧹 清空记录</button>':''}
         </div>
         <ul class="rm-log">${logHtml}</ul>
@@ -11776,6 +11807,11 @@ function renderParent(){
   });
   main.querySelectorAll('.reject-btn').forEach(b=>{
     b.onclick = ()=> reject(b.dataset.rid);
+  });
+  /* 流水时间范围切换：今天 / 近7天 / 更多(全部) */
+  const lrr = main.querySelector('#ledgerRangeRow');
+  if(lrr) lrr.querySelectorAll('.filter-btn').forEach(b=>{
+    b.onclick = ()=>{ ledgerRange = b.dataset.r; render(); };
   });
   const cp = main.querySelector('#changePin');
   if(cp) cp.onclick = ()=>{
@@ -11938,7 +11974,8 @@ function renderDiag(){
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">同步连接</span><span>'+st+'</span></div>'
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">本机角色</span><span>'+roleText+'</span></div>'
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">家庭码</span><span>'+esc(familyCode||'未知')+'</span></div>'
-    + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">设备ID</span><span style="font-size:11px;word-break:break-all;text-align:right;max-width:62%;">'+esc(senderId||'未知')+'</span></div>';
+    + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">设备ID</span><span style="font-size:11px;word-break:break-all;text-align:right;max-width:62%;">'+esc(senderId||'未知')+'</span></div>'
+    + '<div id="peerList" style="border-top:1px dashed #dfe6f0;margin-top:6px;padding-top:6px;">'+peersHtml()+'</div>';
   try {
     const now = Date.now();
     if(!window.__diagVerT || now - window.__diagVerT > 60000){
@@ -11946,6 +11983,41 @@ function renderDiag(){
       if(typeof window.checkVersionInfo === 'function') window.checkVersionInfo(function(){ renderDiag(); });
     }
   } catch(e){}
+}
+/* ===== 家庭设备在线状态：记录每台设备最后发来同步消息的时间（localStorage 持久化） ===== */
+const PEERS_KEY='kidtask_sync_peers_v1';
+function loadSyncPeers(){
+  try{ const o=JSON.parse(localStorage.getItem(PEERS_KEY)||'{}'); return (o&&typeof o==='object'&&!Array.isArray(o))?o:{}; }
+  catch(e){ return {}; }
+}
+function recordPeerSeen(id){
+  if(!id||id===senderId) return;
+  const p=loadSyncPeers();
+  if(p[id] && Date.now()-(Number(p[id])||0) < 30000) return;   /* 30 秒内重复收到不刷新存储，只刷显示 */
+  p[id]=Date.now();
+  try{ localStorage.setItem(PEERS_KEY, JSON.stringify(p)); }catch(e){}
+  const el=document.getElementById('peerList');
+  if(el) el.innerHTML=peersHtml();
+}
+function relTime(ts){
+  const s=Math.max(0, Date.now()-(Number(ts)||0));
+  if(s<60000) return '刚刚';
+  if(s<3600000) return Math.floor(s/60000)+' 分钟前';
+  if(s<86400000) return Math.floor(s/3600000)+' 小时前';
+  return Math.floor(s/86400000)+' 天前';
+}
+function peersHtml(){
+  const peers=loadSyncPeers();
+  const ids=Object.keys(peers).sort((a,b)=>(Number(peers[b])||0)-(Number(peers[a])||0));
+  const rows=['<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 本机</span><span style="color:'+(syncConnected?'#1a9e57':'#e5484d')+';font-weight:700;">'+(syncConnected?'在线':'离线')+'</span></div>'];
+  if(!ids.length){
+    rows.push('<div style="padding:4px 0;color:#9aa3b2;font-size:12px;line-height:1.6;">还没有收到其他设备的消息——其他设备打开 App 并连上同步后，会出现在这里。</div>');
+  } else {
+    ids.forEach(id=>{
+      rows.push('<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 设备 '+esc(String(id).slice(0,6))+'</span><span>最后活跃 '+relTime(peers[id])+'</span></div>');
+    });
+  }
+  return rows.join('');
 }
 /* 折叠面板展开 / 收起（状态记忆在 openPanels，跨重渲染保持） */
 function togglePanel(pid, head){
@@ -11963,7 +12035,135 @@ function mountMyTasks(){
       b.classList.add('sel'); allFilter = b.dataset.f; paintAll();
     };
   });
+  const tsb = main.querySelector('#tplSaveBtn');
+  if(tsb) tsb.onclick = saveTaskTemplate;
+  const tlb = main.querySelector('#tplLoadBtn');
+  if(tlb) tlb.onclick = loadTaskTemplate;
   paintAll();
+}
+
+/* ===== 每周报告：近 7 天完成次数 / 积分趋势（数据源 = dayOps 真相口径，与总账同源） ===== */
+function dayKeyOffset(i){ const d=new Date(); d.setDate(d.getDate()-i); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function weeklyDays(offsetWeeks){
+  const out=[];
+  for(let i=6;i>=0;i--){
+    const key=dayKeyOffset(offsetWeeks*7+i);
+    let cnt=0,pts=0;
+    tasks.forEach(t=>{
+      if(!t||t.cancelled) return;
+      const op=t.dayOps&&t.dayOps[key];
+      if(op&&op.d===1){ cnt++; pts+=Number(op.p)||0; }
+    });
+    const d=new Date(key+'T00:00:00');
+    out.push({key,cnt,pts,dow:d.getDay(),isToday:offsetWeeks===0&&i===0});
+  }
+  return out;
+}
+function weeklyTotals(days){ return days.reduce((a,d)=>({cnt:a.cnt+d.cnt,pts:a.pts+d.pts}),{cnt:0,pts:0}); }
+function weeklyStreak(){
+  let n=0;
+  for(let i=0;i<400;i++){
+    const key=dayKeyOffset(i);
+    const done=tasks.some(t=>t&&!t.cancelled&&t.dayOps&&t.dayOps[key]&&t.dayOps[key].d===1);
+    if(done) n++;
+    else if(i===0) continue;   /* 今天还没完成不打断连续天数，从昨天继续数 */
+    else break;
+  }
+  return n;
+}
+function weeklyTopTask(){
+  const keys=weeklyDays(0).map(d=>d.key);
+  let best=null;
+  tasks.forEach(t=>{
+    if(!t||t.cancelled) return;
+    let c=0;
+    keys.forEach(k=>{ const op=t.dayOps&&t.dayOps[k]; if(op&&op.d===1) c++; });
+    if(c>0&&(!best||c>best.c)) best={title:t.title,c:c};
+  });
+  return best;
+}
+function weeklyReportHtml(){
+  const cur=weeklyDays(0), prev=weeklyDays(1);
+  const t=weeklyTotals(cur), p=weeklyTotals(prev);
+  if(t.cnt===0&&p.cnt===0){
+    return '<div class="empty small"><span class="big">📊</span>近 7 天还没有完成记录，完成任务后这里会出现趋势图哦～</div>';
+  }
+  const trend = p.cnt===0 ? '这是第一周打卡，开门红！🎉'
+    : (t.cnt>=p.cnt ? '比上周多 '+(t.cnt-p.cnt)+' 次 📈' : '比上周少 '+(p.cnt-t.cnt)+' 次，一起加油 📉');
+  const streak=weeklyStreak();
+  const top=weeklyTopTask();
+  const max=Math.max(1,...cur.map(d=>d.cnt));
+  const wd=['日','一','二','三','四','五','六'];
+  const bars=cur.map(d=>
+    '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0;">'
+    + '<span style="font-size:11px;color:'+(d.cnt?'#5a7fb0':'#c2c9d4')+';font-weight:700;">'+(d.cnt||'')+'</span>'
+    + '<div style="width:64%;max-width:34px;height:'+(d.cnt?Math.round(14+92*d.cnt/max):6)+'px;border-radius:8px 8px 4px 4px;background:'+(d.cnt?(d.isToday?'linear-gradient(180deg,#ffb2c8,#ef86a9)':'linear-gradient(180deg,#bfe3d2,#8fd0ae)'):'#eef1f6')+';box-shadow:'+(d.isToday?'0 2px 8px rgba(238,133,171,.35);':'none;')+'"></div>'
+    + '<span style="font-size:11px;color:'+(d.isToday?'#e0749b':'#9aa3b2')+';font-weight:'+(d.isToday?700:400)+';white-space:nowrap;">'+(d.isToday?'今天':'周'+wd[d.dow])+'</span>'
+    + '</div>').join('');
+  const chip='flex:1;min-width:104px;background:#f7f9fc;border:1px solid #e3e9f2;border-radius:12px;padding:8px 10px;text-align:center;font-size:13px;';
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">'
+    + '<span style="'+chip+'">✅ 完成<br><b style="font-size:17px;color:#e0749b;">'+t.cnt+'</b> 次</span>'
+    + '<span style="'+chip+'">💎 获得<br><b style="font-size:17px;color:#5a7fb0;">'+t.pts+'</b> 积分</span>'
+    + '<span style="'+chip+'">🔥 连续<br><b style="font-size:17px;color:#e8973f;">'+streak+'</b> 天</span>'
+    + '</div>'
+    + '<div style="display:flex;align-items:flex-end;gap:6px;height:150px;padding:0 2px;margin-bottom:8px;" id="wrBars">'+bars+'</div>'
+    + '<div style="font-size:12.5px;color:#5a7fb0;line-height:1.7;">'+esc(trend)
+    + (top?(' · 最棒的是「'+esc(top.title)+'」完成 '+top.c+' 次'):'') + '</div>';
+}
+
+/* ===== 任务模板：保存任务设置（不含完成记录），载入时日期自动顺延到现在 ===== */
+const TPL_KEY='kidtask_task_tpl_v1';
+function collectTemplate(){
+  return tasks.filter(t=>t&&!t.cancelled).map(t=>({
+    title:t.title, type:t.type, category:t.category||'其他', importance:t.importance||'normal',
+    desc:t.desc||'', repeat:t.repeat||'once', points:Number(t.points)||1,
+    startDate:t.startDate||'', endDate:t.endDate||'', deadline:t.deadline||''
+  }));
+}
+function shiftISO(iso, delta){
+  if(!iso||!delta) return iso;
+  const d=new Date(iso+'T00:00:00');
+  if(isNaN(d)) return iso;
+  d.setDate(d.getDate()+delta);
+  return fmtISO(d);
+}
+function applyTemplate(){
+  let defs;
+  try{ defs=JSON.parse(localStorage.getItem(TPL_KEY)||'null'); }catch(e){ defs=null; }
+  if(!defs||!defs.length){ showToast('还没有保存过模板，先点「💾 任务存为模板」哦～'); return 0; }
+  const anchor=defs.find(d=>d.startDate||d.deadline);
+  const anchorIso=anchor?((anchor.startDate||anchor.deadline)||''):'';
+  let delta=0;
+  if(anchorIso){
+    const a=new Date(anchorIso+'T00:00:00'), b=new Date(todayStr()+'T00:00:00');
+    if(!isNaN(a)&&!isNaN(b)) delta=Math.round((b-a)/86400000);
+  }
+  let n=0;
+  defs.forEach(d=>{
+    addTask({ title:d.title, type:d.type, category:d.category, importance:d.importance, desc:d.desc,
+      repeat:d.repeat, points:d.points,
+      startDate:shiftISO(d.startDate,delta), endDate:shiftISO(d.endDate,delta),
+      deadline:shiftISO(d.deadline||d.startDate||'',delta) });
+    n++;
+  });
+  return n;
+}
+function saveTaskTemplate(){
+  const defs=collectTemplate();
+  if(!defs.length){ showToast('目前没有可保存的任务哦～'); return; }
+  openConfirmModal('💾 存为任务模板', '将把当前 '+defs.length+' 个任务的设置（名称/分值/周期，不含完成记录）保存为模板，覆盖上一次的模板。', ()=>{
+    try{ localStorage.setItem(TPL_KEY, JSON.stringify(defs)); }catch(e){ showToast('保存失败，存储空间可能已满'); return; }
+    showToast('✅ 模板已保存（'+defs.length+' 个任务）');
+  });
+}
+function loadTaskTemplate(){
+  let defs;
+  try{ defs=JSON.parse(localStorage.getItem(TPL_KEY)||'null'); }catch(e){ defs=null; }
+  if(!defs||!defs.length){ showToast('还没有保存过模板，先点「💾 任务存为模板」哦～'); return; }
+  openConfirmModal('📥 从模板载入任务', '将按模板新建 '+defs.length+' 个任务（保留分值与周期，日期顺延到现在），不影响已有任务和完成记录。确定载入吗？', ()=>{
+    const n=applyTemplate();
+    if(n>0){ render(); showToast('✅ 已从模板新建 '+n+' 个任务'); }
+  });
 }
 /* 家长手动加/扣 积分·星星（含每日上限校验 + 流水记录） */
 function adjustExtra(kind, sign){
@@ -12271,6 +12471,7 @@ function handleSyncMessage(topic, payload){
   lastRemoteTsPrev = lastRemoteTs;                // 记录合并前全局最大远端 ts，供冲突判定（本端未同步编辑）
   lastRemoteTs = obj.ts;
   lastRemoteTsBySender[obj.senderId] = obj.ts;
+  try { recordPeerSeen(obj.senderId); } catch(e){}   /* 设备在线追踪：记录对端最后活跃时间（家长端同步状态展示用） */
   logicalTs = Math.max(logicalTs, obj.ts + 1);     // 逻辑时钟推进：保证本端后续发出的 ts 一定比见过的更大，跨设备时钟不一致也不会被误判过期
   try { localStorage.setItem('kidtask_sync_ts', String(logicalTs)); } catch(e){}
   applySyncState(obj);
@@ -12637,6 +12838,16 @@ document.addEventListener('click', (e) => {
     try { _fetchLatest(function(latest){ if(latest) try { window.__remoteBuildVersion = String(latest); } catch(e){} if(cb) cb(latest ? String(latest) : null); }); } catch(e){ if(cb) cb(null); }
   };
 })();
+</script>
+<script>
+/* PWA：注册 Service Worker（sw.js 由发版脚本生成到站点根）。
+   网络优先 + 离线兜底：有网时永远拿最新 index.html（根治旧缓存），断网时用缓存照常打开。
+   本地 file:// 打开或浏览器不支持时静默跳过，不影响任何现有功能。 */
+try {
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  }
+} catch(e) {}
 </script>
 </body>
 </html>
