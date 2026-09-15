@@ -1,0 +1,19 @@
+{
+ "name": "孟雅的专属小城堡",
+ "short_name": "任务城堡",
+ "description": "儿童任务 / 习惯 / 积分管理小城堡",
+ "start_url": "./index.html",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "portrait",
+ "background_color": "#fff5fa",
+ "theme_color": "#ff8fab",
+ "icons": [
+  {
+   "src": "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20512%20512%22%3E%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%22108%22%20fill%3D%22%23ffd6e5%22%2F%3E%3Cpath%20d%3D%22M256%2096l52%20116%20126%2012-95%2084%2028%20124-111-66-111%2066%2028-124-95-84%20126-12z%22%20fill%3D%22%23ef86a9%22%20stroke%3D%22%23db6b90%22%20stroke-width%3D%2210%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E",
+   "sizes": "any",
+   "type": "image/svg+xml",
+   "purpose": "any"
+  }
+ ]
+}
