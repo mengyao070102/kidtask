@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609130" />
+<meta name="build-version" content="202609132" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -6426,6 +6426,10 @@ function renderDice(){
   `).join('') : '<li class="r-empty">还没有摇过哦，点下面的按钮开始第一局～</li>';
   main.innerHTML = `
     <div class="page-head"><h1 class="page-title">🌈 摇骰子</h1><button class="back-btn" id="diceBack">‹ 返回</button></div>
+    <div class="dice-rule" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--accent-soft);border-radius:10px;padding:7px 10px;margin:0 0 10px;font-size:12.5px;color:var(--ink);">
+      <span>📋 本期规则：<b id="diceRuleText">🔒 由家长设置</b></span>
+      <button class="link-btn" id="diceRulePeek">查看</button>
+    </div>
     <div class="dice-wrap">
       <div class="dice-meta">
         ⭐ 我的星星（全局）：<b>${stars}</b>　·　已摇：<b>${dice.used}</b> 次　·　当前第 <b>${dice.round}</b> 局
@@ -6455,6 +6459,14 @@ function renderDice(){
     </div>`;
   saveDice();
   const b = main.querySelector('#diceBack'); if(b) b.onclick = ()=>{ activeGame=null; renderGames(); window.scrollTo(0,0); };
+  /* 本期规则：默认只显示「由家长设置」；查看详情一律需家长密码（不剧透大数规则） */
+  const ruleTxt = main.querySelector('#diceRuleText'), ruleBtn = main.querySelector('#diceRulePeek');
+  if(ruleTxt && ruleBtn) ruleBtn.onclick = ()=>{
+    requireParentPin('🔐 查看骰子规则', ()=>{
+      ruleTxt.textContent = diceCfgCurrentText() + '（由家长设置）';
+      ruleBtn.style.display='none';
+    }, '查看本期骰子规则需要家长密码哦～');
+  };
   const rb = main.querySelector('#rollBtn'); if(rb && remain>0) rb.onclick = rollDice;
   const rt = main.querySelector('#diceReset'); if(rt) rt.onclick = ()=>{
     confirmModal({
