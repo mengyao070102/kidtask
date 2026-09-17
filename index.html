@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609135" />
+<meta name="build-version" content="202609136" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -12167,9 +12167,11 @@ function homeworkCurveSvg(){
     grid+='<text x="'+(L-6)+'" y="'+(y+3.5).toFixed(1)+'" text-anchor="end" font-size="10" fill="#9aa3b2">'+hh+':'+String(mm).padStart(2,'0')+'</text>';
   }
   pts.forEach((p,i)=>{
-    if(i%2===0||i===pts.length-1){
-      const d=new Date(p.key+'T00:00:00');
-      xlabels+='<text x="'+xF(i).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="'+(i===pts.length-1?'#e0749b':'#9aa3b2')+'">'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+'</text>';
+    const d=new Date(p.key+'T00:00:00');
+    const isToday=i===pts.length-1;
+    xlabels+='<text x="'+xF(i).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" fill="'+(isToday?'#e0749b':'#9aa3b2')+'"'+(isToday?' font-weight="700"':'')+'>'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+'</text>';
+    if(isToday){
+      xlabels+='<text x="'+xF(i).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" dy="-11" fill="#e0749b" font-weight="700">今</text>';
     }
   });
   let path='',dots='',run=[];
