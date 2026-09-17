@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609132" />
+<meta name="build-version" content="202609135" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -3785,6 +3785,14 @@ function renderHome(){
   // 同步按钮：手动触发与其他设备的数据同步（重渲染后同样需重新绑定）
   const hsSync = document.getElementById('homeSyncBtn');
   if(hsSync) hsSync.onclick = ()=> doManualSync();
+
+  // 首页最底部：作业完成时间曲线（近 14 天，家长孩子都能看到自己的完成节奏）
+  const hwCard = document.createElement('div');
+  hwCard.id = 'homeHwCurve';
+  hwCard.style.cssText = 'background:var(--card,#fff);border:1px solid var(--accent-soft,#e3e9f2);border-radius:16px;padding:14px 16px;margin-top:14px;box-shadow:0 4px 14px rgba(0,0,0,.05);';
+  hwCard.innerHTML = homeworkCurveHtml();
+  main.appendChild(hwCard);
+
   refreshSyncUI();
 }
 
@@ -12121,6 +12129,69 @@ function weeklyReportHtml(){
     + '<div style="display:flex;align-items:flex-end;gap:6px;height:150px;padding:0 2px;margin-bottom:8px;" id="wrBars">'+bars+'</div>'
     + '<div style="font-size:12.5px;color:#5a7fb0;line-height:1.7;">'+esc(trend)
     + (top?(' · 最棒的是「'+esc(top.title)+'」完成 '+top.c+' 次'):'') + '</div>';
+}
+
+/* ===== 作业完成时间曲线：近 14 天每日最后一次「任意任务」完成时刻（数据源=dayOps.at 真相口径） ===== */
+function homeworkFinishTimes(nDays){
+  const out=[];
+  for(let i=nDays-1;i>=0;i--){
+    const key=dayKeyOffset(i);
+    let latest=0;
+    tasks.forEach(t=>{
+      if(!t||t.cancelled) return;
+      const op=t.dayOps&&t.dayOps[key];
+      const at=(op&&op.d===1)?(Number(op.at)||0):0;
+      if(at>latest) latest=at;
+    });
+    /* at 需为毫秒级真实时间戳（防老种子 ts=1 之类假值混入坐标） */
+    out.push({key, at: latest>100000000000?latest:0});
+  }
+  return out;
+}
+function fmtHM(ts){ const d=new Date(ts); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function homeworkCurveSvg(){
+  const W=680,H=210,L=46,R=12,T=14,B=26;
+  const pts=homeworkFinishTimes(14);
+  const times=pts.map(p=>p.at?new Date(p.at):null);
+  const hrs=times.filter(Boolean).map(d=>d.getHours()+d.getMinutes()/60);
+  if(!hrs.length) return '';
+  let lo=Math.max(6,Math.floor(Math.min(...hrs))-1), hi=Math.min(24,Math.ceil(Math.max(...hrs))+1);
+  if(hi-lo<2) hi=lo+2;
+  const xF=i=>L+i*(W-L-R)/(pts.length-1);
+  const yF=h=>T+(1-(h-lo)/(hi-lo))*(H-T-B);
+  let grid='',xlabels='';
+  for(let k=0;k<=4;k++){
+    const h=lo+(hi-lo)*k/4, y=yF(h);
+    grid+='<line x1="'+L+'" y1="'+y.toFixed(1)+'" x2="'+(W-R)+'" y2="'+y.toFixed(1)+'" stroke="#eef1f6" stroke-width="1"/>';
+    const hh=Math.floor(h), mm=Math.round((h-hh)*60);
+    grid+='<text x="'+(L-6)+'" y="'+(y+3.5).toFixed(1)+'" text-anchor="end" font-size="10" fill="#9aa3b2">'+hh+':'+String(mm).padStart(2,'0')+'</text>';
+  }
+  pts.forEach((p,i)=>{
+    if(i%2===0||i===pts.length-1){
+      const d=new Date(p.key+'T00:00:00');
+      xlabels+='<text x="'+xF(i).toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="'+(i===pts.length-1?'#e0749b':'#9aa3b2')+'">'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+'</text>';
+    }
+  });
+  let path='',dots='',run=[];
+  const flushRun=()=>{ if(run.length>1) path+='<polyline fill="none" stroke="#ef86a9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="'+run.map(v=>v.x.toFixed(1)+','+v.y.toFixed(1)).join(' ')+'"/>'; run=[]; };
+  pts.forEach((p,i)=>{
+    if(p.at){
+      const x=xF(i), y=yF(times[i].getHours()+times[i].getMinutes()/60);
+      run.push({x:x,y:y});
+      const last=i===pts.length-1;
+      dots+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+(last?5:4)+'" fill="'+(last?'#e0749b':'#ef86a9')+'" stroke="#fff" stroke-width="1.5"><title>'+p.key+' 完成于 '+fmtHM(p.at)+'</title></circle>';
+    } else flushRun();
+  });
+  flushRun();
+  return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="作业完成时间曲线">'+grid+xlabels+path+dots+'</svg>';
+}
+function homeworkCurveHtml(){
+  const svg=homeworkCurveSvg();
+  return '<div style="margin-top:14px;padding-top:10px;border-top:1px dashed #e3e9f2;">'
+    +'<div style="font-size:13px;font-weight:700;color:#5a7fb0;margin-bottom:6px;">⏰ 作业完成时间曲线（近 14 天 · 每日最后一次任务完成时刻）</div>'
+    +(svg||'<div style="font-size:12.5px;color:#9aa3b2;padding:8px 0;">近 14 天还没有任务完成记录，打卡后这里会出现曲线哦～</div>')
+    +'<div style="font-size:11.5px;color:#b0b8c4;margin-top:4px;">💡 曲线越靠下＝完成得越早；悬停/点按圆点可看具体时间</div>'
+    +'</div>';
 }
 
 /* ===== 任务模板：保存任务设置（不含完成记录），载入时日期自动顺延到现在 ===== */
