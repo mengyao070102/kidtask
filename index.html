@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609141" />
+<meta name="build-version" content="202609147" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1616,6 +1616,25 @@
   .earn-today { background:linear-gradient(135deg,#fff6e0,#ffe9f3); border:1.5px solid #ffd9a8; border-radius:14px; padding:10px 14px; margin-bottom:12px; font-weight:800; font-size:15px; color:#c8742e; box-shadow:0 2px 8px rgba(255,180,90,.18); }
   .earn-today b { color:#e75480; font-size:17px; padding:0 2px; }
   @media(max-width:600px){ .earn-today { font-size:14px; padding:9px 12px; } .earn-today b { font-size:16px; } }
+  /* ♻️ 可恢复积分横幅 + 家长面板勾选 + 恢复弹窗列表 */
+  .points-entry.recov-entry { background:linear-gradient(135deg,#eafaf0,#e0f7e9); border:1.5px solid #b7e4c7; flex-wrap:wrap; }
+  .points-entry.recov-entry .pe-left { color:#1d7a46; }
+  .points-entry.recov-entry b { color:#1d7a46; }
+  .pe-rec-tip { flex-basis:100%; font-size:11.5px; font-weight:700; color:#3f8f5f; margin-top:2px; }
+  .points-entry.recov-under { margin-top:-8px; margin-left:14px; width:calc(100% - 14px); border-radius:0 0 14px 14px; border-top:none; }
+  .recov-group-h { font-weight:900; font-size:13.5px; color:#245c3c; background:#e3f6ea; border-radius:10px; padding:6px 12px; margin:4px 0 6px; }
+  .points-entry .gd-rec-btn { font-weight:800; color:#1d7a46; }
+  .points-entry .gd-rec-btn b { color:#1d7a46; }
+  .rm-rec { display:flex; align-items:flex-start; gap:6px; font-size:12px; color:#6b5a6e; cursor:pointer; line-height:1.5; }
+  .rm-rec input { margin-top:2px; width:16px; height:16px; flex:none; accent-color:#2f9e63; }
+  .rm-rec b { color:#2f9e63; }
+  .recov-list { display:flex; flex-direction:column; gap:8px; max-height:52vh; overflow-y:auto; margin:6px 0 10px; }
+  .recov-item { display:flex; align-items:center; justify-content:space-between; gap:10px; background:#f4fbf6; border:1.5px solid #cdeeda; border-radius:12px; padding:9px 12px; }
+  .recov-item .ri-info { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .recov-item .ri-reason { font-weight:800; font-size:14px; color:#245c3c; word-break:break-all; }
+  .recov-item .ri-meta { font-size:12px; color:#7aa88c; font-weight:600; }
+  .recov-item .ri-btn { white-space:nowrap; flex:none; background:#2f9e63; }
+  @media(max-width:600px){ .recov-item { flex-direction:column; align-items:stretch; } .recov-item .ri-btn { width:100%; } }
   /* 横向星期切换 */
   .day-tabs { display:flex; gap:8px; margin-bottom:16px; overflow-x:auto; padding-bottom:4px; }
   .day-tabs::-webkit-scrollbar { height:6px; }
@@ -2522,12 +2541,32 @@ function saveExtraLog(){ if(extraLog.length>1000) extraLog = extraLog.slice(-100
 /* 余额由流水重算（多端同步后自然一致、不重复计、不丢） */
 function recomputeExtra(){ let p=0, s=0; for(const r of extraLog){ const d=Number(r.delta)||0; if(r.kind==='star') s+=d; else p+=d; } extra.points=p; extra.stars=s; }
 function extraUsedToday(kind){ const d = fmtISO(new Date()); return extraLog.filter(r=>r.day===d && r.kind===kind && r.delta>0).reduce((s,r)=>s+r.delta,0); }
-function addExtraRecord(kind, delta, note){
+function addExtraRecord(kind, delta, note, ex){
   const id = 'x'+Date.now()+Math.random().toString(36).slice(2,6);
-  extraLog.push({ id, day:fmtISO(new Date()), at:Date.now(), kind:kind, delta:delta, note:note||'' });
+  const row = { id, day:fmtISO(new Date()), at:Date.now(), kind:kind, delta:delta, note:note||'' };
+  if(ex && ex.rec) row.rec = 1;       /* 可恢复扣减：首页显示「还有N积分可恢复」，家长确认原因后可回补 */
+  if(ex && ex.back) row.back = ex.back; /* 恢复流水：指向被恢复的那条扣减记录 id */
+  extraLog.push(row);
   saveExtraLog();
   saveExtra();   // 重算余额并推同步（余额以流水为准）
   if(deviceRole === 'child' && delta > 0) publishChildEvent({ kind: kind==='star'?'stars':'points', logId:id, day:fmtISO(new Date()), delta, note:note||'' }); // 落地版方案B：孩子端赚分/星发事件
+}
+/* 可恢复扣减：未恢复列表（extraLog 条目不可变、按 id 并集同步 → 恢复用新增 back 流水表达，不改原条目）；积分与星星均支持 */
+function recoverableDeductions(kind){
+  const backIds = new Set(extraLog.filter(r=>r && r.back).map(r=>String(r.back)));
+  return extraLog.filter(r=>r && (Number(r.delta)||0)<0 && r.rec && !backIds.has(String(r.id)) && (!kind || r.kind===kind))
+    .sort((a,b)=>(Number(b.at)||0)-(Number(a.at)||0));
+}
+function recoverableTotal(kind){ return recoverableDeductions(kind).reduce((s,r)=>s+(-Number(r.delta)),0); }
+/* 首页提醒语用：把可恢复扣减时填的原因去重拼接（超长截断），如「主动帮忙做家务、顶嘴扣2分」 */
+function recoverReasonsTxt(kind){
+  const seen = new Set(); const out = [];
+  recoverableDeductions(kind).forEach(r=>{
+    const n = String(r.note||'未填写原因').trim() || '未填写原因';
+    if(!seen.has(n)){ seen.add(n); out.push(n); }
+  });
+  const s = out.join('、');
+  return s.length>40 ? s.slice(0,40)+'…' : (s || '未填写原因');
 }
 recomputeExtra();   // 启动按流水校正余额
 /* 家长审核密码（默认 1234，可修改） */
@@ -3675,10 +3714,22 @@ function renderHome(){
       <div class="pe-left">⭐ 我的积分</div>
       <div class="pe-right"><b>${bal}</b> 分 <button class="link-btn" id="goRewards">去兑换 ›</button></div>
     </div>
+    ${recoverableTotal('point')>0 ? `
+    <div class="points-entry recov-entry recov-under">
+      <div class="pe-left">♻️ 积分恢复</div>
+      <div class="pe-right">还有 <b>${recoverableTotal('point')}</b> 分可恢复 <button class="link-btn gd-rec-btn" data-kind="point">去恢复 ›</button></div>
+      <div class="pe-rec-tip">请注意扣除原因：【${recoverReasonsTxt('point')}】，无法恢复哦</div>
+    </div>` : ''}
     <div class="points-entry">
       <div class="pe-left">🌟 我的星星</div>
       <div class="pe-right"><b>${stars}</b> 颗 <span class="pe-tip">可用来摇骰子</span></div>
     </div>
+    ${recoverableTotal('star')>0 ? `
+    <div class="points-entry recov-entry recov-under">
+      <div class="pe-left">♻️ 星星恢复</div>
+      <div class="pe-right">还有 <b>${recoverableTotal('star')}</b> 个星星可恢复 <button class="link-btn gd-rec-btn" data-kind="star">去恢复 ›</button></div>
+      <div class="pe-rec-tip">请注意扣除原因：【${recoverReasonsTxt('star')}】，无法恢复哦</div>
+    </div>` : ''}
     ${checkinHtml()}
     <div class="stats">
       <div class="stat s1"><div class="num">${total}</div><div class="lab">任务总数</div></div>
@@ -3697,6 +3748,7 @@ function renderHome(){
   main.querySelectorAll('#gSem .sem-btn').forEach(b=>{
     b.onclick = ()=>{ semester=b.dataset.s; localStorage.setItem(SKEY, semester); touchMeta('s'); pushSync(); render(); };
   });
+  main.querySelectorAll('.gd-rec-btn').forEach(b=>{ b.onclick = ()=> openRecoverModal(b.dataset.kind); });
 
   const tl = document.getElementById('todayList');
   const hint = document.createElement('div');
@@ -10820,6 +10872,60 @@ function openConfirmModal(title, msg, onYes){
   ov.onclick = (e)=>{ if(e.target===ov) close(); };
   ov.querySelector('#cfYes').onclick = ()=>{ close(); if(onYes) onYes(); };
 }
+/* ♻️ 可恢复积分/星星：恢复弹窗（列出每笔可恢复扣减及其原因；恢复需家长密码 + 确认原因） */
+function openRecoverModal(kind){
+  /* kind='point'/'star'：只显示对应类目的可恢复条目（首页两个入口各带各的类目，不混在一起）；不传则两类都显示 */
+  const only = (kind==='point'||kind==='star') ? kind : null;
+  const list = only ? recoverableDeductions(only) : recoverableDeductions();
+  if(!list.length){ showToast(only==='star' ? '当前没有可恢复的星星哦～' : only==='point' ? '当前没有可恢复的积分哦～' : '当前没有可恢复的积分/星星哦～'); return; }
+  const tp = recoverableTotal('point'), ts = recoverableTotal('star');
+  const totalTxt = only==='point' ? (tp+' 分') : only==='star' ? (ts+' 个星星') : [tp>0 ? tp+' 分' : '', ts>0 ? ts+' 个星星' : ''].filter(Boolean).join('、');
+  /* 积分 / 星星各自分组显示，不整合在一起 */
+  const itemHtml = r=>{
+    const isStar = r.kind==='star';
+    const amt = -Number(r.delta);
+    const unit = isStar ? '⭐ 个星星' : '💎 分';
+    const dt = r.at ? new Date(Number(r.at)) : null;
+    const ds = dt ? `${dt.getMonth()+1}月${dt.getDate()}日` : (r.day||'');
+    return `<div class="recov-item" data-rid="${esc(String(r.id))}">
+      <div class="ri-info"><span class="ri-reason">📝 ${esc(r.note||'（未填写原因）')}</span><span class="ri-meta">${esc(ds)} · 扣了 ${amt} ${isStar?'个星星':'分'}</span></div>
+      <button class="btn primary ri-btn" data-rid="${esc(String(r.id))}" data-amt="${amt}" data-kind="${r.kind}" data-note="${esc(r.note||'')}">恢复 ${amt} ${unit}</button>
+    </div>`;
+  };
+  const groups = [];
+  if(tp>0 && (!only || only==='point')) groups.push(`<div class="recov-group-h">💎 积分（共 ${tp} 分可恢复）</div><div class="recov-list">${recoverableDeductions('point').map(itemHtml).join('')}</div>`);
+  if(ts>0 && (!only || only==='star')) groups.push(`<div class="recov-group-h">⭐ 星星（共 ${ts} 个星星可恢复）</div><div class="recov-list">${recoverableDeductions('star').map(itemHtml).join('')}</div>`);
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.innerHTML = `
+    <div class="modal confirm-modal recov-modal">
+      <h3>♻️ 恢复${only==='point'?'积分':only==='star'?'星星':''}（共 ${totalTxt}）</h3>
+      <p class="confirm-msg">以下是可恢复的扣减记录，恢复前请核对扣分原因：</p>
+      ${groups.join('')}
+      <div class="modal-actions"><button class="btn cancel" id="rcClose">关闭</button></div>
+    </div>`;
+  document.body.appendChild(ov);
+  const close = ()=> ov.remove();
+  ov.querySelector('#rcClose').onclick = close;
+  ov.onclick = (e)=>{ if(e.target===ov) close(); };
+  ov.querySelectorAll('.ri-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      const rid = btn.dataset.rid, amt = parseInt(btn.dataset.amt,10)||0, note = btn.dataset.note, kind = btn.dataset.kind==='star'?'star':'point';
+      const unitTxt = kind==='star' ? amt+' 个星星' : amt+' 分';
+      /* 恢复 = 家长权限（PIN 真护栏）→ 二次确认弹窗展示扣分原因 → 确认后回补 */
+      requireParentPin('恢复'+(kind==='star'?'星星':'积分'), ()=>{
+        openConfirmModal('♻️ 确认恢复这笔'+(kind==='star'?'星星':'积分')+'？', `扣分原因：${note||'（未填写原因）'}；将恢复 ${unitTxt} 到孩子余额。`, ()=>{
+          /* 再查一遍：多端并发时防止同一笔恢复两次 */
+          if(!recoverableDeductions().some(r=>String(r.id)===rid)){ showToast('这笔已恢复过啦～'); close(); render(); return; }
+          addExtraRecord(kind, amt, '恢复：'+note, { back: rid });
+          close();
+          render();
+          showToast('已恢复 '+unitTxt+(kind==='star'?' ⭐':' 💎'));
+        });
+      });
+    };
+  });
+}
 function showToast(msg){
   const t = document.createElement('div');
   t.className = 'toast';
@@ -11653,7 +11759,14 @@ function pointLedger(){
   });
   extraLog.forEach(r=>{
     if(r.kind!=='point') return;
-    rows.push({ at:r.at || Date.now(), src:(r.note ? '家长调整：'+r.note : '家长手动调整'), pts:Number(r.delta) });
+    if(r.back){
+      /* 恢复流水：显示被恢复那笔的扣分原因 */
+      const orig = extraLog.find(o=>o && String(o.id)===String(r.back));
+      const tag = r.kind==='star' ? '♻️ 星星恢复' : '♻️ 积分恢复';
+      rows.push({ at:r.at || Date.now(), src:tag+'（原因：'+((orig&&orig.note)||r.note||'未填写')+'）', pts:Number(r.delta) });
+      return;
+    }
+    rows.push({ at:r.at || Date.now(), src:(r.note ? '家长调整：'+r.note+(r.rec?'（可恢复）':'') : '家长手动调整'), pts:Number(r.delta) });
   });
   redeemed.forEach(r=>{
     if(r.status!=='approved') return;
@@ -11783,6 +11896,10 @@ function renderParent(){
           <div class="rm-item">
             <span class="rm-label">📝 备注 <span style="color:#e5484d;font-weight:700;">*</span></span>
             <input class="rm-input rm-note" id="rmNote" type="text" maxlength="20" placeholder="必填：备注原因，如：主动帮忙做家务 / 顶嘴扣分" />
+          </div>
+          <div class="rm-item">
+            <span class="rm-label">♻️ 恢复</span>
+            <label class="rm-rec"><input type="checkbox" id="rmRecover" /><span>本次<b>扣除积分/星星</b>设为可恢复（勾选后首页会显示「还有N分/个星星可恢复」，恢复时需家长输入密码并核对扣分原因；不勾选的扣除无法恢复哦）</span></label>
           </div>
         </div>
       </div>
@@ -12402,9 +12519,14 @@ function adjustExtra(kind, sign){
   }
   if(isP) extra.points += sign*v; else extra.stars += sign*v;
   saveExtra();
-  addExtraRecord(kind, sign*v, note);
+  /* 扣积分/星星时可勾选「可恢复」：流水带 rec 标记，首页显示可恢复横幅，恢复时需确认原因 */
+  let ex = null;
+  const recCb = main.querySelector('#rmRecover');
+  if(sign<0 && recCb && recCb.checked) ex = { rec:1 };
+  addExtraRecord(kind, sign*v, note, ex);
+  if(recCb) recCb.checked = false;   // 用完即复位，避免下次加星误带
   render();
-  showToast((sign>0?'已添加 ':'已扣除 ')+v+' '+unit+(isP?' 💎':' ⭐'));
+  showToast((sign>0?'已添加 ':'已扣除 ')+v+' '+unit+(isP?' 💎':' ⭐')+(ex?'（可恢复）':''));
 }
 function approve(rid){
   const r = redeemed.find(x=>x.rid===rid);
