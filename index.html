@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609150" />
+<meta name="build-version" content="202609151" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -531,8 +531,8 @@
     box-shadow:0 3px 0 #b98fd0;
   }
   .parent-entry:active { transform:translateY(2px); box-shadow:0 1px 0 #b98fd0; }
-  .back-btn { background:var(--accent-soft); color:var(--accent-d); border:2px solid var(--accent-soft); border-radius:999px; padding:8px 16px; font:inherit; font-weight:800; font-size:14px; cursor:pointer; box-shadow:0 3px 0 #f1d7e6; }
-  .back-btn:active { box-shadow:0 1px 0 #f1d7e6; transform:translateY(2px); }
+  .back-btn { background:var(--accent-soft); color:var(--accent-d); border:2px solid var(--accent-soft); border-radius:999px; padding:8px 16px; font:inherit; font-weight:800; font-size:14px; cursor:pointer; box-shadow:0 3px 0 var(--sidebar-dark); }
+  .back-btn:active { box-shadow:0 1px 0 var(--sidebar-dark); transform:translateY(2px); }
   /* 答题后锁定返回按钮（强制读完解析，至少 3 秒） */
   .back-btn.return-locked { opacity:.55; cursor:not-allowed; pointer-events:none; box-shadow:none; background:#eee; color:#999; border-color:#e0e0e0; }
   /* 统一「答案解析」展示块 */
@@ -11206,6 +11206,12 @@ const THEMES = [
 ];
 /* 角色主题集合：这些主题会额外套用图标/按钮动画与切换飘浮装饰 */
 const CHAR_THEMES = new Set(['pony','kitty','bear','star','strawberry','yeluoli','mengke']);
+/* 每个主题的系统顶栏色（浏览器地址栏 / PWA 标题栏，取自各主题 --sidebar 底色）：
+   sakura #ffd6e5 是默认 :root 的 --sidebar。切主题时同步更新 <meta theme-color> 与 manifest */
+const THEME_TOPBAR = {
+  sakura:'#ffd6e5', midnight:'#3a3559', apple:'#d4eec0', ocean:'#bcdef6', sunset:'#ffdcb8', grape:'#dcc8f2',
+  pony:'#ffdcec', kitty:'#ffd2db', bear:'#eed6b2', star:'#3a3f66', strawberry:'#ffc9d0', yeluoli:'#f3d7ee', mengke:'#ffd9e8'
+};
 /* 切换角色主题时飘浮的装饰表情 */
 const THEME_FX = {
   pony:['🌈','🦄','⭐','✨'],
@@ -11243,6 +11249,30 @@ function updateMascots(){
   if(sm) sm.innerHTML = m;
 }
 function getTheme(){ return localStorage.getItem(THEME_KEY) || 'sakura'; }
+/* 系统顶栏跟随主题：浏览器地址栏（meta theme-color）+ PWA 安装后的标题栏（manifest theme_color/background_color）
+   旧版缺陷：meta/manifest 硬编码粉色 #ff8fab，切主题后顶栏永远是粉色（2026-09-20 修） */
+function updateTopBarColor(t){
+  const c = THEME_TOPBAR[t] || THEME_TOPBAR.sakura;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.setAttribute('content', c);
+  try{
+    const link = document.querySelector('link[rel="manifest"]');
+    if(link && !link.dataset.topbarDone){
+      link.dataset.topbarDone = '1';
+      fetch(link.getAttribute('href')).then(r=>r.json()).then(j=>{
+        j.theme_color = c; j.background_color = c;
+        const url = URL.createObjectURL(new Blob([JSON.stringify(j)], { type:'application/manifest+json' }));
+        link.setAttribute('href', url);
+      }).catch(()=>{});
+    } else if(link && link.href.startsWith('blob:')){
+      fetch(link.href).then(r=>r.json()).then(j=>{
+        j.theme_color = c; j.background_color = c;
+        const url = URL.createObjectURL(new Blob([JSON.stringify(j)], { type:'application/manifest+json' }));
+        link.setAttribute('href', url);
+      }).catch(()=>{});
+    }
+  }catch(e){}
+}
 function applyTheme(t){
   if(!THEMES.some(x=>x.id===t)) t='sakura'; /* 旧数据里可能存有已下线主题，兜底回默认 */
   t = t || 'sakura';
@@ -11253,6 +11283,7 @@ function applyTheme(t){
   else root.removeAttribute('data-char');
   try { localStorage.setItem(THEME_KEY, t); } catch(e){}
   updateMascots();
+  updateTopBarColor(t);
   playThemeSwitchFx(t);
 }
 function buildModelPicker(){
