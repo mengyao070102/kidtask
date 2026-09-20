@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609147" />
+<meta name="build-version" content="202609148" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -2813,7 +2813,11 @@ function starCount(){
     }
     let starAdj = 0;
     for(const r of extraLog){ if(r && r.kind==='star' && (Number(r.at)||0) > anchorTs) starAdj += (Number(r.delta)||0); }
-    return Math.max(0, (Number(top.remain)||0) + after + starAdj);
+    /* 锚点后新产生的摇骰记录也要扣：top 本身是最近一次摇骰（remain 已含那次 -1），
+       但并集合并/时钟偏差可能让 top 之后还有更新记录，逐条回补，防止锚点值「卡住不降」导致无限摇 */
+    let rollsAfter = 0;
+    for(const e of starLog){ if(e && (Number(e.ts)||0) > anchorTs) rollsAfter++; }
+    return Math.max(0, (Number(top.remain)||0) + after + starAdj - rollsAfter);
   }
   return Math.max(0, base - spent);
 }
@@ -6580,8 +6584,10 @@ function rollDice(){
   dice.details.push({ r:dice.round, idx:face, val:val });
   dice.used++;   // 每摇一次消耗 1 颗星星（共享星星池，跨端同步）
   dice.round++;  // 每摇一次算一局
-  // 记录星星使用历史：每摇一次消耗 1 颗星星（带唯一 id，便于跨端按 id 并集合并去重）
-  starLog.unshift({ id: senderId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), ts: Date.now(), date: fmtDateTime(new Date()), round: dice.lastRound, val: val, remain: starCount() });
+  /* 记录星星使用历史：每摇一次消耗 1 颗星星（带唯一 id，便于跨端按 id 并集合并去重）
+     remain 显式取「摇前余额-1」：不能在这里调 starCount()——锚点路径下 starCount 是以「上一条 remain」
+     为基准的，不会包含本次 -1，曾导致锚点值永远不降、星星不扣、可以无限摇（2026-09-20 修） */
+  starLog.unshift({ id: senderId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), ts: Date.now(), date: fmtDateTime(new Date()), round: dice.lastRound, val: val, remain: Math.max(0, stars - 1) });
   if(starLog.length > 1000) starLog.length = 1000;   // 上限 200→1000：保留更完整的星星使用历史
   saveStarLog(); saveDice();
   pushSync(true);   // 立即把「已消耗星星」广播到全家，各端星星数保持一致
