@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609148" />
+<meta name="build-version" content="202609150" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -711,6 +711,11 @@
   .dd-val.up { color:#2fa86a; }
   .dd-val.down { color:#e75480; }
   .dd-remain { margin-left:8px; font-size:13px; color:#a07a8a; }
+  .dd-acc { margin-left:auto; font-size:12.5px; color:#7a5a6a; white-space:nowrap; }
+  .dd-acc b { color:#e75480; font-size:14px; }
+  .dd-item.dd-round { background:linear-gradient(135deg,#fff7fb,#fdeef5); }
+  .dd-item.dd-round .dd-val b { color:#e75480; }
+  .section-sub { font-size:12.5px; font-weight:700; color:#b78a9d; margin-left:6px; }
   .rm-sub { font-size:13px; color:#a07a8a; }
   .rm-input.sm { width:74px; }
   .pet-card { background:#fff; border:2px solid var(--accent-soft); border-radius:22px; padding:26px 20px; text-align:center; max-width:420px; margin-bottom:22px; }
@@ -2796,28 +2801,38 @@ function deriveTaskCancel(t){
 function starCount(){
   const base = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + (Number(extra.stars)||0);
   const spent = Math.max((dice && dice.used) || 0, starLog.length);
-  /* 数据漂移自校正：当「已消耗计数」大于「完成基数」（多因历史数据迁移/重置/测试数据导致）时，
-     完成新任务也看不到星星变化（被 max(0,…) 钉住）。
-     此时改用「锚点法」：以最近一次摇骰记录里的 remain（摇完那一刻的真实余额）为基准，
-     加上那之后新获得的星星——dayOps.at 晚于锚点 ts 的完成次数 + 锚点后的手工调星(extraLog star)。
-     干净数据下 spent<=base，走原公式，行为与历史完全一致。 */
+  if(spent <= base) return Math.max(0, base - spent);
+  /* 数据漂移自校正（spent>base，多因历史迁移/重置/家长扣星把 base 压到已摇数之下）：
+     以最近一次摇骰记录为锚点做增量推算。
+     v202609149：新格式条目带 baseAt/spentAt 快照，用「remain + Δbase − Δspent」纯增量公式，
+     完全不依赖时间戳——旧版靠 at>anchorTs 比对增量，设备时钟超前时锚点落在「未来」，
+     之后所有完成/家长调整都算不进余额 → 星星数冻结不更新（2026-09-20 用户反馈修复）。 */
   const top = starLog.length ? starLog[0] : null;
-  if(top && top.remain != null && spent > base){
-    const anchorTs = Number(top.ts)||0;
-    let after = 0;
-    for(const t of tasks){
-      if(!t) continue;
-      const ops = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps : null;
-      if(!ops) continue;
-      for(const d in ops){ const o = ops[d]; if(o && Number(o.d)===1 && (Number(o.at)||0) > anchorTs) after++; }
+  if(top && top.remain != null){
+    /* 优先用带快照的新格式条目（纯增量、不依赖时间戳） */
+    const topNF = starLog.find(e => e && e.remain != null && typeof e.baseAt === 'number' && typeof e.spentAt === 'number');
+    if(topNF){
+      return Math.max(0, (Number(topNF.remain)||0) + (base - topNF.baseAt) - (spent - topNF.spentAt));
     }
-    let starAdj = 0;
-    for(const r of extraLog){ if(r && r.kind==='star' && (Number(r.at)||0) > anchorTs) starAdj += (Number(r.delta)||0); }
-    /* 锚点后新产生的摇骰记录也要扣：top 本身是最近一次摇骰（remain 已含那次 -1），
-       但并集合并/时钟偏差可能让 top 之后还有更新记录，逐条回补，防止锚点值「卡住不降」导致无限摇 */
-    let rollsAfter = 0;
-    for(const e of starLog){ if(e && (Number(e.ts)||0) > anchorTs) rollsAfter++; }
-    return Math.max(0, (Number(top.remain)||0) + after + starAdj - rollsAfter);
+    /* 老格式条目（无快照）：退回时间戳启发式。锚点选「最新的 ts ≤ 现在+1分钟」的记录——
+       跳过时钟超前设备产生的「未来」记录，否则增量窗口被永久关死、星星数冻结不更新 */
+    let anchor = null;
+    for(const e of starLog){ if(e && e.remain != null && (Number(e.ts)||0) <= Date.now() + 60000){ anchor = e; break; } }
+    if(anchor){
+      const anchorTs = Number(anchor.ts)||0;
+      let after = 0;
+      for(const t of tasks){
+        if(!t) continue;
+        const ops = (t.dayOps && typeof t.dayOps === 'object') ? t.dayOps : null;
+        if(!ops) continue;
+        for(const d in ops){ const o = ops[d]; if(o && Number(o.d)===1 && (Number(o.at)||0) > anchorTs) after++; }
+      }
+      let starAdj = 0;
+      for(const r of extraLog){ if(r && r.kind==='star' && (Number(r.at)||0) > anchorTs) starAdj += (Number(r.delta)||0); }
+      let rollsAfter = 0;
+      for(const e of starLog){ if(e && (Number(e.ts)||0) > anchorTs) rollsAfter++; }
+      return Math.max(0, (Number(anchor.remain)||0) + after + starAdj - rollsAfter);
+    }
   }
   return Math.max(0, base - spent);
 }
@@ -6336,10 +6351,12 @@ function loadDice(){
     if(o && typeof o==='object') return {
       round: o.round||1, used: o.used||0, details: Array.isArray(o.details)?o.details:[],
       current: Array.isArray(o.current)&&o.current.length===6 ? o.current : null,
-      lastFace: o.lastFace||null, lastVal: (o.lastVal==null?null:o.lastVal), lastRound: o.lastRound||null
+      lastFace: o.lastFace||null, lastVal: (o.lastVal==null?null:o.lastVal), lastRound: o.lastRound||null,
+      turn: Math.max(1, Number(o.turn)||1),                          /* 当前是第几「轮」（每次开始新一轮 +1） */
+      rounds: Array.isArray(o.rounds)?o.rounds:[]                    /* 历史每轮汇总：{id,no,total,rolls,endedAt}，跨端同步 */
     };
   } catch(e){}
-  return { round:1, used:0, details:[], current:null, lastFace:null, lastVal:null, lastRound:null };
+  return { round:1, used:0, details:[], current:null, lastFace:null, lastVal:null, lastRound:null, turn:1, rounds:[] };
 }
 function saveDice(){ localStorage.setItem(DICE_KEY, JSON.stringify(dice)); }
 /* ============ 放松时间 · 家长可设每日时长上限 ============ */
@@ -6490,9 +6507,13 @@ function renderDice(){
       <span class="dchip-idx">${i+1}</span>
       <span class="dchip-val">${fmtDiceVal(v)}</span>
     </div>`).join('');
-  const detailRows = dice.details.length ? dice.details.map(d=>`
-    <li class="dd-item"><span class="dd-r">第${d.r}局</span><span class="dd-idx">摇中第${d.idx}格</span><span class="dd-val up">+${fmtDiceVal(d.val)}</span></li>
-  `).join('') : '<li class="r-empty">还没有摇过哦，点下面的按钮开始第一局～</li>';
+  const detailRows = dice.details.length ? (()=>{ let acc=0; return dice.details.map(d=>{ acc += (Number(d.val)||0); return `
+    <li class="dd-item"><span class="dd-r">第${d.r}局</span><span class="dd-idx">摇中第${d.idx}格</span><span class="dd-val up">+${fmtDiceVal(d.val)}</span><span class="dd-acc">累计 <b>${fmtDiceVal(acc)}</b></span></li>`; }).join(''); })() : '<li class="r-empty">还没有摇过哦，点下面的按钮开始第一局～</li>';
+  const roundRows = (dice.rounds||[]).length ? dice.rounds.map(r=>{
+    const dt = r.endedAt ? new Date(Number(r.endedAt)) : null;
+    const ds = dt ? `${dt.getMonth()+1}月${dt.getDate()}日` : '';
+    return `<li class="dd-item dd-round"><span class="dd-r">🏁 第${r.no}轮</span><span class="dd-idx">${ds ? ds+' · ' : ''}共摇 ${r.rolls} 局</span><span class="dd-val up">总得分 <b>${fmtDiceVal(r.total)}</b></span></li>`;
+  }).join('') : '<li class="r-empty">还没有完整玩完一轮哦～点「开始新一轮」结束后，本轮总得分会记录在这里</li>';
   main.innerHTML = `
     <div class="page-head"><h1 class="page-title">🌈 摇骰子</h1><button class="back-btn" id="diceBack">‹ 返回</button></div>
     <div class="dice-rule" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--accent-soft);border-radius:10px;padding:7px 10px;margin:0 0 10px;font-size:12.5px;color:var(--ink);">
@@ -6518,7 +6539,9 @@ function renderDice(){
         <p class="dice-hint block">这 6 个数字会一直保留、可反复摇（每次摇消耗 1 颗星星）；想换一组数字就点「刷新数字」</p>
       </div>
       <div class="dice-sum">累计得分：<b>${fmtDiceVal(sum)}</b></div>
-      <h3 class="section-h">📋 每局明细</h3>
+      <h3 class="section-h">🏁 每轮总得分 <span class="section-sub">第 ${dice.turn||1} 轮进行中</span></h3>
+      <ul class="dd-list">${roundRows}</ul>
+      <h3 class="section-h">📋 每局明细 <span class="section-sub">第 ${dice.turn||1} 轮</span></h3>
       <ul class="dd-list">${detailRows}</ul>
       <div class="dice-total">总得分：<b>${fmtDiceVal(sum)}</b></div>
       <h3 class="section-h">⭐ 星星使用记录</h3>
@@ -6540,16 +6563,23 @@ function renderDice(){
   const rt = main.querySelector('#diceReset'); if(rt) rt.onclick = ()=>{
     confirmModal({
       title: '🔄 开始新一轮？',
-      message: '会清空当前得分和每局明细，从第 1 局重新开始哦～\n（已经用掉的星星不会退回）',
+      message: '本轮总得分会先存入「每轮总得分」汇总，然后清空明细、从第 1 局重新开始哦～\n（已经用掉的星星不会退回）',
       confirmText: '开始新一轮', cancelText: '再想想',
       onConfirm: ()=>{
         // 重新开始棋盘：从第 1 局、清空得分开始，但不退还已消耗的星星（星星为全局消耗，摇完即扣）
+        // 本轮成绩先存入「每轮总得分」汇总（跨端同步），再清空明细
+        const tSum = dice.details.reduce((a,d)=>a + (Number(d.val)||0), 0);
+        if(dice.details.length){
+          dice.rounds.unshift({ id: senderId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), no: dice.turn||1, total: tSum, rolls: dice.details.length, endedAt: Date.now() });
+          if(dice.rounds.length > 500) dice.rounds.length = 500;
+        }
+        dice.turn = (dice.turn||1) + 1;
         dice.round = 1;
         dice.details = [];
         dice.current = genDiceRound(1);
         dice.lastFace = null; dice.lastVal = null; dice.lastRound = null;
-        diceSel = null; saveDice(); renderDice();
-        showToast('已开始新一轮游戏，从第 1 局玩起 🎲');
+        diceSel = null; saveDice(); pushSync(); renderDice();
+        showToast('已开始第 '+dice.turn+' 轮，本轮成绩已存入每轮汇总 🎲');
       }
     });
   };
@@ -6586,8 +6616,12 @@ function rollDice(){
   dice.round++;  // 每摇一次算一局
   /* 记录星星使用历史：每摇一次消耗 1 颗星星（带唯一 id，便于跨端按 id 并集合并去重）
      remain 显式取「摇前余额-1」：不能在这里调 starCount()——锚点路径下 starCount 是以「上一条 remain」
-     为基准的，不会包含本次 -1，曾导致锚点值永远不降、星星不扣、可以无限摇（2026-09-20 修） */
-  starLog.unshift({ id: senderId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), ts: Date.now(), date: fmtDateTime(new Date()), round: dice.lastRound, val: val, remain: Math.max(0, stars - 1) });
+     为基准的，不会包含本次 -1，曾导致锚点值永远不降、星星不扣、可以无限摇（2026-09-20 修）。
+     baseAt/spentAt：记录此刻的完成基数与已摇数快照，starCount 锚点路径用
+     「remain + Δbase − Δspent」纯增量推算，免疫设备时钟偏差（星星数冻结不更新的根因）。 */
+  const _baseAt = tasks.reduce((s,t)=>s+taskDoneCount(t),0) + (Number(extra.stars)||0);
+  const _spentAt = Math.max(dice.used, starLog.length + 1);
+  starLog.unshift({ id: senderId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,6), ts: Date.now(), date: fmtDateTime(new Date()), round: dice.lastRound, val: val, remain: Math.max(0, stars - 1), baseAt: _baseAt, spentAt: _spentAt });
   if(starLog.length > 1000) starLog.length = 1000;   // 上限 200→1000：保留更完整的星星使用历史
   saveStarLog(); saveDice();
   pushSync(true);   // 立即把「已消耗星星」广播到全家，各端星星数保持一致
@@ -12764,6 +12798,9 @@ function collectSyncState(){
     starLog,
     /* 已消耗星星数（摇骰子花费）：单调计数，跨端按较大值合并，确保各端星星余额一致 */
     diceUsed: dice.used,
+    /* 摇骰子「每轮总得分」汇总（点开始新一轮时归档）：跨端按 id 并集合并，历史不丢 */
+    diceRounds: dice.rounds || [],
+    diceTurn: dice.turn || 1,
     /* 孩子端行为事件流（孩子动态时间线的数据来源）：孩子端本地留存后随同步通道补推，家长端按 id 并集合并，断网也不丢 */
     childEvents: childEventLog,
     /* 打卡只同步孩子端的记录：家长端快照不带 checkin，避免家长端打卡覆盖孩子的连续记录 */
@@ -12982,6 +13019,27 @@ function applySyncState(obj){
     }
     /* 已消耗星星数（摇骰子花费）：单调计数，跨端取较大值合并（最后/最多者赢），保证各端星星余额一致 */
     if(typeof obj.diceUsed === 'number' && obj.diceUsed > (dice.used||0)){ dice.used = obj.diceUsed; saveDice(); if(page==='games' && activeGame==='dice'){ try{ renderDice(); }catch(e){} } }
+    /* 摇骰子「每轮总得分」汇总：按唯一 id 并集合并（三端各玩各的轮次都保留，不互相覆盖）；轮编号取两端最大，避免新轮撞号 */
+    if(Array.isArray(obj.diceRounds)){
+      const seen = new Set((dice.rounds||[]).map(r=>String(r && r.id)));
+      let merged = false, maxNo = dice.turn||1;
+      (dice.rounds||[]).forEach(r=>{ if(r && Number(r.no)>=maxNo) maxNo = Number(r.no)+1; });
+      obj.diceRounds.forEach(r=>{
+        if(!r || r.id==null || seen.has(String(r.id))) { if(r && Number(r.no)>=maxNo) maxNo = Number(r.no)+1; return; }
+        dice.rounds = dice.rounds || [];
+        dice.rounds.push({ id:String(r.id), no:Number(r.no)||1, total:Number(r.total)||0, rolls:Number(r.rolls)||0, endedAt:Number(r.endedAt)||0 });
+        if(Number(r.no)>=maxNo) maxNo = Number(r.no)+1;
+        merged = true;
+      });
+      if(merged){
+        dice.rounds.sort((a,b)=>(Number(b.endedAt)||0)-(Number(a.endedAt)||0));
+        if(dice.rounds.length > 500) dice.rounds.length = 500;
+        if(maxNo > (dice.turn||1)) dice.turn = maxNo;
+        saveDice();
+        if(page==='games' && activeGame==='dice'){ try{ renderDice(); }catch(e){} }
+      } else if(maxNo > (dice.turn||1)){ dice.turn = maxNo; saveDice(); }
+    }
+    if(typeof obj.diceTurn === 'number' && obj.diceTurn > (dice.turn||1)){ dice.turn = obj.diceTurn; saveDice(); }
     /* 注：petCfg 随宠物一起纯本地、不同步 */
     if(obj.checkin && typeof obj.checkin==='object'){ checkin = { last:String(obj.checkin.last||''), streak:Number(obj.checkin.streak)||0, total:Number(obj.checkin.total)||0 }; try{ localStorage.setItem(CHECKIN_KEY, JSON.stringify(checkin)); }catch(e){} }
     /* 徽章按 id 并集（成就数据：三端各解锁不同徽章都应保留，不能 last-write-wins 丢） */
