@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609151" />
+<meta name="build-version" content="202609156" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1595,6 +1595,14 @@
   .opt.wrong { border-color:#e75480; background:#fdeaf0; color:#d63a5e; }
   .q-exp { margin-top:10px; padding:10px 12px; border-radius:12px; background:#fff7e6; border:1px solid #ffe0a3; }
   .q-exp-ans { font-size:14px; font-weight:800; color:#c97a16; }
+  .q-exp-ans.ok { color:#1d9e57; }
+  .r-wrong-list { margin-top:10px; text-align:left; background:#fff; border:1.5px solid #f3d2de; border-radius:14px; padding:10px 12px; max-height:260px; overflow-y:auto; }
+  .rwl-title { font-size:13px; font-weight:800; color:#c2557e; margin-bottom:6px; }
+  .r-wrong-item { display:flex; flex-direction:column; gap:2px; padding:6px 8px; border-radius:10px; background:#fdf2f6; margin-bottom:6px; font-size:13px; }
+  .r-wrong-item:last-child { margin-bottom:0; }
+  .rwi-q { font-weight:700; color:#6a5560; }
+  .rwi-a { color:#c2456f; font-weight:700; }
+  .rwi-exp { color:#7a6a7a; font-size:12.5px; }
   .q-exp-text { font-size:14px; color:#7a5a2e; margin-top:4px; line-height:1.5; }
   /* 提交答卷/提交批改按钮：用 .btn.quiz-submit 提升优先级，盖过任何 .btn 白色样式；
      颜色写死品牌粉，避免 var(--accent) 在某些主题/缓存下解析异常导致按钮变白 */
@@ -2860,6 +2868,16 @@ const GRADES = ['1','2','3','4','5','6'];
 const SKEY = 'kidtask_semester_v1';
 let semester = localStorage.getItem(SKEY) || '上学期';
 function gradeName(g){ return g ? g+'年级' : '未设置'; }
+/* 年级变更统一入口：清掉所有按旧年级缓存/生成的题目，保证后续出题与当前年级一致（2026-09-22）
+   说明：被清变量在运行时才访问（函数调用时机晚于全部 let 声明求值），无 TDZ 风险 */
+function onGradeChanged(){
+  try{ if(typeof petCareQCache!=='undefined') petCareQCache.length = 0; }catch(e){}
+  try{ petQuestion = null; }catch(e){}
+  try{ brainOnline = []; brainOnlineGrade = null; }catch(e){}
+  try{ knowledgeState.item = null; knowledgeState.online = false; }catch(e){}
+  try{ localStorage.removeItem(KNOWLEDGE_KEY); }catch(e){}
+  try{ manorQuiz = null; }catch(e){}
+}
 
 
 /* 教材版本：数学=苏教版，语文=人教版，英语=译林版 */
@@ -3332,10 +3350,43 @@ function shuffleQ(item){
   for(const k in item){ if(!(k in base)) base[k] = item[k]; }
   return base;
 }
-/* 尝试把题目解析为「a 运算符 b = ?」形式的纯四则运算并求出正确值。
-   仅覆盖小学单步加减乘除（如 “12 + 23 = ?” / “5 - 2 = ?”），应用题/语文/英语返回 null（无法程序校验，放行给上层）。 */
+/* 把选项/答案文本解析成数值：支持整数、小数、分数 a/b、百分数 n%，解析失败返回 NaN */
+function mathOperandVal(s){
+  s = String(s).trim();
+  let m = s.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if(m){ const d = parseFloat(m[2]); return d ? parseFloat(m[1])/d : NaN; }
+  m = s.match(/^(\d+(?:\.\d+)?)\s*%$/);
+  if(m) return parseFloat(m[1])/100;
+  if(/^-?\d+(?:\.\d+)?$/.test(s)) return parseFloat(s);
+  return NaN;
+}
+/* 尝试把题目解析为可程序复算的数学题并求出正确值。
+   覆盖：普通四则（含 × ÷ 全角符号）、分数加减（a/b ± c/d）、一元方程（nx=c / x±a=c / a-x=c）。
+   应用题/语文/英语返回 null（无法程序校验，放行给上层）。 */
 function tryMathCalc(qText){
-  const m = String(qText).match(/^\s*\(?(\d+(?:\.\d+)?)\)?\s*([\+\-\*\/])\s*\(?(\d+(?:\.\d+)?)\)?\s*=\s*\??\s*$/);
+  const t = String(qText)
+    .replace(/[×✕✖]/g,'*').replace(/[÷]/g,'/')
+    .replace(/[＋]/g,'+').replace(/[－–—]/g,'-').replace(/[＝]/g,'=');
+  /* 一元方程：nx = c（含 解方程 3x = 12；允许尾部「，x = ?」复述） */
+  const XTAIL = '(?:\\s*[，,]\\s*[xX]\\s*=\\s*\\???)?$';
+  let m = t.match(new RegExp('^\\s*解方程\\s*[，,]?\\s*(\\d+(?:\\.\\d+)?)\\s*\\*?\\s*[xX]\\s*=\\s*(\\d+(?:\\.\\d+)?)\\s*=?\\s*\\??\\s*' + XTAIL));
+  if(m){ const a=parseFloat(m[1]), c=parseFloat(m[2]); return a ? c/a : NaN; }
+  // x ± a = c
+  m = t.match(new RegExp('^\\s*(?:解方程\\s*[，,]?\\s*)?[xX]\\s*([+\\-])\\s*(\\d+(?:\\.\\d+)?)\\s*=\\s*(\\d+(?:\\.\\d+)?)\\s*=?\\s*\\??\\s*' + XTAIL));
+  if(m){ const a=parseFloat(m[2]), c=parseFloat(m[3]); return m[1]==='+' ? c-a : c+a; }
+  // a - x = c
+  m = t.match(new RegExp('^\\s*(?:解方程\\s*[，,]?\\s*)?(\\d+(?:\\.\\d+)?)\\s*-\\s*[xX]\\s*=\\s*(\\d+(?:\\.\\d+)?)\\s*=?\\s*\\??\\s*' + XTAIL));
+  if(m){ return parseFloat(m[1]) - parseFloat(m[2]); }
+  // 分数加减：a/b ± c/d = ?
+  m = t.match(/^\s*(\d+)\s*\/\s*(\d+)\s*([+\-])\s*(\d+)\s*\/\s*(\d+)\s*=\s*\??\s*$/);
+  if(m){
+    const d1=+m[2], d2=+m[5];
+    if(!d1 || !d2) return null;
+    const v = m[3]==='+' ? (+m[1])/d1 + (+m[4])/d2 : (+m[1])/d1 - (+m[4])/d2;
+    return isFinite(v) ? v : null;
+  }
+  // 普通四则
+  m = t.match(/^\s*\(?(\d+(?:\.\d+)?)\)?\s*([+\-*/])\s*\(?(\d+(?:\.\d+)?)\)?\s*=\s*\??\s*$/);
   if(!m) return null;
   const x = parseFloat(m[1]), op = m[2], y = parseFloat(m[3]);
   let v;
@@ -3347,6 +3398,70 @@ function tryMathCalc(qText){
     default: return null;
   }
   return isFinite(v) ? v : null;
+}
+/* 通用四则算式求值器：支持多步 + - × ÷（含全角符号）、小数、括号、一元负号。
+   题干可带「= ?」尾缀（方程/分数等 tryMathCalc 已覆盖的形式解析不了时返回 NaN，由调用方跳过复核）。
+   用于对模型出的计算题做程序复核：算式是准的，答案以复算为准。 */
+function calcEvalExpr(qText){
+  const s = String(qText)
+    .replace(/[×✕✖]/g,'*').replace(/[÷]/g,'/')
+    .replace(/[＋]/g,'+').replace(/[－–—]/g,'-')
+    .replace(/[＝=]\s*\??\s*$/,'')
+    .replace(/[，,、]/g,'');
+  let i = 0;
+  function ws(){ while(i < s.length && /\s/.test(s[i])) i++; }
+  function num(){
+    ws();
+    const m = s.slice(i).match(/^\d+(?:\.\d+)?/);
+    if(!m) return NaN;
+    i += m[0].length;
+    return parseFloat(m[0]);
+  }
+  function factor(){
+    ws();
+    if(s[i] === '('){ i++; const v = expr(); ws(); if(s[i] === ')'){ i++; return v; } return NaN; }
+    if(s[i] === '-'){ i++; const v = factor(); return -v; }
+    if(s[i] === '+'){ i++; return factor(); }
+    return num();
+  }
+  function term(){
+    let v = factor();
+    for(;;){
+      ws();
+      if(s[i] === '*'){ i++; v *= factor(); }
+      else if(s[i] === '/'){ i++; const d = factor(); if(!d) return NaN; v /= d; }
+      else return v;
+    }
+  }
+  function expr(){
+    let v = term();
+    for(;;){
+      ws();
+      if(s[i] === '+'){ i++; v += term(); }
+      else if(s[i] === '-'){ i++; v -= term(); }
+      else return v;
+    }
+  }
+  const v = expr();
+  ws();
+  return (i >= s.length && isFinite(v)) ? v : NaN;
+}
+/* 展开模型解析里的字母指代（选A / 选项B / 「C」 / 答案是A）为对应选项的文字内容。
+   大模型题的选项会被洗牌，若解析里写死字母，洗牌后解析就指着错的选项——必须在洗牌前展开。 */
+function expandExpLetters(exp, o){
+  let t = String(exp||'');
+  if(!t || !Array.isArray(o)) return t;
+  const FW = {'Ａ':'A','Ｂ':'B','Ｃ':'C','ａ':'A','ｂ':'B','ｃ':'C'};
+  t = t.replace(/[ＡＢＣａｂｃ]/g, ch=>FW[ch]||ch);
+  const sub = letter => {
+    const i = 'ABC'.indexOf(letter);
+    return (i>=0 && o[i]!=null) ? '「'+o[i]+'」' : letter;
+  };
+  t = t.replace(/选项\s*([ABC])(?![A-Za-z0-9])/g, (m,l)=>sub(l));
+  t = t.replace(/选\s*([ABC])(?![A-Za-z0-9])/g, (m,l)=>sub(l));
+  t = t.replace(/答案(?:是|为)?\s*([ABC])(?![A-Za-z0-9])/g, (m,l)=>sub(l));
+  t = t.replace(/[「『"“]([ABC])[」』"”](?![A-Za-z0-9])/g, (m,l)=>sub(l));
+  return t;
 }
 /* 联网（大模型）题目的健壮性归一化：
    1) 选项必须全部不同，否则视为废题（避免“两个看起来都对”的混淆）；
@@ -3360,9 +3475,23 @@ function normModelQ(q){
   if(new Set(o).size !== o.length) return null;          // 选项重复 → 废题
   const a = Number(q.a);
   if(!(a >= 0 && a < o.length)) return null;             // 答案下标非法 → 废题
-  const correct = tryMathCalc(q.q);
-  if(correct !== null && String(correct) !== String(o[a])) return null;  // 算术题答案标错 → 废题
-  return shuffleQ({ q:String(q.q), o, a, diff:String(q.diff||learnDiff), exp:String(q.exp||''), img:String(q.img||'') });
+  /* 数学题程序复核：先试单步/分数/方程（tryMathCalc），再试多步四则（calcEvalExpr）。
+     正确选项按数值比较（兼容 3/4、0.8、18.84、25% 等写法），
+     复算不出（非计算题）→ 跳过；复算得出但选项对不上 → 模型标错答案，整题判废回退本地题库 */
+  let correct = tryMathCalc(q.q);
+  if(correct === null){
+    const ev = calcEvalExpr(q.q);
+    if(isFinite(ev)) correct = ev;
+  }
+  if(correct !== null){
+    /* 数学题必须程序复算过关：正确选项按数值比较（兼容 3/4、0.8、18.84、25% 等写法），
+       选项不是数值或数值对不上 → 模型标错答案，整题判废回退本地题库 */
+    const ov = mathOperandVal(o[a]);
+    if(!isFinite(ov) || Math.abs(ov - correct) > 1e-9) return null;
+  }
+  /* 洗牌前先把解析里的字母指代（选A/选项B/「C」）展开成选项文字，防止洗牌后解析指错 */
+  const exp2 = expandExpLetters(q.exp, o);
+  return shuffleQ({ q:String(q.q), o, a, diff:String(q.diff||learnDiff), exp:exp2, img:String(q.img||'') });
 }
 
 
@@ -3762,8 +3891,8 @@ function renderHome(){
   const gi = GRADES.indexOf(grade);
   const gPrev = document.getElementById('gPrev');
   const gNext = document.getElementById('gNext');
-  if(gPrev){ gPrev.disabled = gi<=0; gPrev.onclick = ()=>{ if(gi>0){ grade=GRADES[gi-1]; localStorage.setItem(GKEY, grade); touchMeta('g'); pushSync(); render(); } }; }
-  if(gNext){ gNext.disabled = gi>=GRADES.length-1; gNext.onclick = ()=>{ if(gi<GRADES.length-1){ grade=GRADES[gi+1]; localStorage.setItem(GKEY, grade); touchMeta('g'); pushSync(); render(); } }; }
+  if(gPrev){ gPrev.disabled = gi<=0; gPrev.onclick = ()=>{ if(gi>0){ grade=GRADES[gi-1]; localStorage.setItem(GKEY, grade); touchMeta('g'); onGradeChanged(); pushSync(); render(); } }; }
+  if(gNext){ gNext.disabled = gi>=GRADES.length-1; gNext.onclick = ()=>{ if(gi<GRADES.length-1){ grade=GRADES[gi+1]; localStorage.setItem(GKEY, grade); touchMeta('g'); onGradeChanged(); pushSync(); render(); } }; }
   main.querySelectorAll('#gSem .sem-btn').forEach(b=>{
     b.onclick = ()=>{ semester=b.dataset.s; localStorage.setItem(SKEY, semester); touchMeta('s'); pushSync(); render(); };
   });
@@ -5664,20 +5793,63 @@ const ANIMALS = [
   { e:'🦊', name:'狐狸', food:'小动物和果子', fact:'狐狸很聪明，尾巴大大的，冬天能当被子盖。', opts:['小动物和果子','草','石头'] }
 ];
 function loadMath(){ try{ const o=JSON.parse(localStorage.getItem(MATH_KEY)); if(o&&typeof o.score==='number') return o; }catch(e){} return { score:0, total:0, best:0 }; }
+/* 口算按年级分档（2026-09-22）：1年级20以内加减 / 2年级100以内加减+表内乘法 / 3年级万内加减+表内除法 / 4-6年级更大数乘除 */
+function mathScopeDesc(g){
+  return {
+    '1':'20以内的加法和减法（减法结果不能为负）',
+    '2':'100以内的加法和减法（减法结果不能为负），或表内乘法（乘法口诀，1~9相乘）',
+    '3':'万以内的加减法（减法结果不能为负），或表内除法（能整除）',
+    '4':'万以内的加减法，或两三位数乘一位数、除数是一位数且能整除的除法',
+    '5':'万以内的加减法，或两位数乘两位数、能整除的除法',
+    '6':'较大数的加减法，或乘除混合（能整除、结果不超 10000）'
+  }[String(g)] || '100以内的加法和减法';
+}
 function newMath(){
-  const a = 1+kkRand(20), b = 1+kkRand(20); const op = kkRand(2)===0 ? '+' : '-';
-  if(op==='+'){ mathState.q = { q:`${a} + ${b} = ?`, ans:a+b }; }
-  else { const big=Math.max(a,b), small=Math.min(a,b); mathState.q = { q:`${big} - ${small} = ?`, ans:big-small }; }
+  const g = String(grade||'1');
+  if(g==='1'){
+    const a = 1+kkRand(20), b = 1+kkRand(20); const op = kkRand(2)===0 ? '+' : '-';
+    if(op==='+'){ mathState.q = { q:`${a} + ${b} = ?`, ans:a+b }; }
+    else { const big=Math.max(a,b), small=Math.min(a,b); mathState.q = { q:`${big} - ${small} = ?`, ans:big-small }; }
+    return;
+  }
+  const ri = n => Math.floor(Math.random()*n);
+  let a,b,op,ans;
+  if(g==='2'){
+    if(ri(2)===0){ a=1+ri(100); b=1+ri(100); op = ri(2)===0?'+':'-'; if(op==='-'){ const A=Math.max(a,b),B=Math.min(a,b); a=A; b=B; } ans = op==='+'?a+b:a-b; }
+    else { a=1+ri(9); b=1+ri(9); op='×'; ans=a*b; }
+  } else if(g==='3'){
+    if(ri(2)===0){ a=ri(9000)+100; b=ri(9000)+100; op = ri(2)===0?'+':'-'; if(op==='-'){ const A=Math.max(a,b),B=Math.min(a,b); a=A; b=B; } ans = op==='+'?a+b:a-b; }
+    else { const m=1+ri(9), n=1+ri(9); a=m*n; b=m; op='÷'; ans=n; }
+  } else if(g==='4'){
+    if(ri(2)===0){ a=ri(9000)+100; b=ri(9000)+100; op = ri(2)===0?'+':'-'; if(op==='-'){ const A=Math.max(a,b),B=Math.min(a,b); a=A; b=B; } ans = op==='+'?a+b:a-b; }
+    else if(ri(2)===0){ a=10+ri(90); b=1+ri(9); op='×'; ans=a*b; }
+    else { b=2+ri(8); ans=10+ri(90); a=b*ans; op='÷'; }
+  } else { /* 5-6年级 */
+    if(ri(2)===0){ a=ri(9000)+100; b=ri(9000)+100; op = ri(2)===0?'+':'-'; if(op==='-'){ const A=Math.max(a,b),B=Math.min(a,b); a=A; b=B; } ans = op==='+'?a+b:a-b; }
+    else if(ri(2)===0){ a=10+ri(90); b=10+ri(90); op='×'; ans=a*b; }
+    else { b=2+ri(18); ans=10+ri(90); a=b*ans; op='÷'; }
+  }
+  mathState.q = { q:`${a} ${op} ${b} = ?`, ans };
 }
 /* 联网（大模型）出一道口算题，失败返回 null */
 async function genStudyMathOnline(){
-  const p = `给 6-8 岁小朋友出 1 道口算题（加法或减法，数字 1 到 50，减法结果非负）。只返回 JSON：{"q":"12 + 23 = ?","ans":35}，不要任何解释或多余文字。`;
-  try{ const out = await llmChat(p, 0.5); const o = (typeof out==='string')?JSON.parse(out):out; if(o&&typeof o.q==='string'&&typeof o.ans==='number') return { q:o.q, ans:o.ans }; }catch(e){ console.warn('口算联网出题失败：', e); } return null;
+  const g = String(grade||'1');
+  const p = `给小学${g}年级学生出 1 道口算题（参照苏教版小学数学${g}年级教学进度；范围：${mathScopeDesc(g)}）。只返回 JSON：{"q":"12 + 23 = ?","ans":35}，不要任何解释或多余文字。`;
+  try{ const out = await llmChat(p, 0.5); const o = (typeof out==='string')?JSON.parse(out):out;
+    if(o && typeof o.q==='string' && typeof o.ans==='number'){
+      /* 程序复算（2026-09-22）：算式与模型答案对不上 → 判废回退本地题库，杜绝标错答案的口算 */
+      const ev = calcEvalExpr(o.q);
+      if(isFinite(ev) && Math.abs(ev - Number(o.ans)) <= 0.01) return { q:o.q, ans:Math.round(ev*100)/100 };
+      console.warn('口算联网出题复核未通过（算式', o.q, '模型答案', o.ans, '复算', ev, '），回退本地');
+      return null;
+    }
+  }catch(e){ console.warn('口算联网出题失败：', e); } return null;
 }
 /* 联网（大模型）出一道动物小问答，失败返回 null */
 async function genStudyAnimalOnline(){
-  const p = `随机选一种孩子熟悉的常见小动物，出一道「它最爱吃什么」的选择题。只返回 JSON：{"e":"🐱","name":"小猫","food":"鱼","fact":"小猫喜欢用爪子洗脸。","opts":["鱼","草","石头"]}。opts 为 3 个中文选项且必须包含正确答案 food，e 用动物 emoji。不要任何解释。`;
-  try{ const out = await llmChat(p, 0.8); const o = (typeof out==='string')?JSON.parse(out):out; if(o&&o.name&&o.food&&Array.isArray(o.opts)&&o.opts.length===3&&o.opts.includes(o.food)) return o; }catch(e){ console.warn('动物联网出题失败：', e); } return null;
+  const g = String(grade||'1');
+  const p = `随机选一种孩子熟悉的常见小动物，出一道「它最爱吃什么」的选择题，语言难度要适合小学${g}年级学生。只返回 JSON：{"e":"🐱","name":"小猫","food":"鱼","fact":"小猫喜欢用爪子洗脸。","opts":["鱼","草","石头"]}。opts 为 3 个中文选项且必须包含正确答案 food，e 用动物 emoji。不要任何解释。`;
+  try{ const out = await llmChat(p, 0.8); const o = (typeof out==='string')?JSON.parse(out):out; if(o&&o.name&&o.food&&Array.isArray(o.opts)&&o.opts.length===3&&o.opts.includes(o.food)&&new Set(o.opts.map(String)).size===o.opts.length) return o; }catch(e){ console.warn('动物联网出题失败：', e); } return null;
 }
 /* 异步确保口算题（联网优先，失败回退本地） */
 async function ensureMath(){
@@ -5714,7 +5886,9 @@ const SCIENCE_BANK = [
 ];
 function newScience(){ scienceState.q = SCIENCE_BANK[kkRand(SCIENCE_BANK.length)]; }
 async function genStudyScienceOnline(){
-  const p = `给 6-9 岁小朋友出一道有趣的科普问答题（生活常识或自然现象），用孩子能听懂的话解释原因。只返回 JSON：{"q":"问题？","a":"用一两句话的解释"}，不要任何解释或多余文字。`;
+  const g = String(grade||'1');
+  const age = 6 + (parseInt(g,10)>1 ? parseInt(g,10)-1 : 0);
+  const p = `给小学${g}年级（约${age}岁）小朋友出一道有趣的科普问答题（生活常识或自然现象），用孩子能听懂的话解释原因。只返回 JSON：{"q":"问题？","a":"用一两句话的解释"}，不要任何解释或多余文字。`;
   try{ const out = await llmChat(p, 0.8); const o = (typeof out==='string')?JSON.parse(out):out; if(o&&typeof o.q==='string'&&typeof o.a==='string') return { q:o.q, a:o.a }; }catch(e){ console.warn('科学联网出题失败：', e); } return null;
 }
 async function ensureScience(){
@@ -7837,7 +8011,7 @@ function duQuizHtml(){
     else if(duQuiz.wrong >= 0 && i === q.a) cls+=' right';
     return `<button class="${cls}" data-qi="${i}">${String.fromCharCode(65+i)}. ${o}</button>`;
   }).join('');
-  const exp = duQuiz.wrong >= 0 ? `<div class="du-q-exp">💡 解析：${q.exp||'（暂无解析）'}</div>` : '';
+  const exp = duQuiz.wrong >= 0 ? `<div class="du-q-exp">💡 解析：${esc(choiceExplain(q))}</div>` : '';
   const retry = duQuiz.wrong >= 0 ? `<button class="btn primary" id="duQuizRetry">🔄 换一道题再试</button>` : '';
   return `<div class="du-quiz">
     <div class="du-q-meta">${q.diff||'常识'}题 · 答对得一套造型</div>
@@ -9084,13 +9258,19 @@ ${topics}${unitLine}
 }
 function llmValidateCalc(out, count){
   if(!out || !Array.isArray(out.problems)) throw new Error('返回结构不正确');
-  const ps = out.problems.map(p=>{
-    if(typeof p.q !== 'string') throw new Error('题目字段缺失');
-    const a = Number(p.a);
-    if(isNaN(a)) throw new Error('答案不是数字');
-    return { q: p.q.trim(), a: Math.round(a*1000000)/1000000 };
-  });
-  return ps.slice(0, count);
+  /* 逐题程序复算（2026-09-22）：过去只检查 a 是数字、答案全凭模型自觉，模型算错就判孩子错。
+     现在：算式解析不了/负数答案 → 废题丢弃；算式能算 → 答案以复算为准（模型标错也自动纠正）。 */
+  const ps = [];
+  for(const p of out.problems){
+    if(!p || typeof p.q !== 'string' || !p.q.trim()) continue;
+    const q = p.q.trim();
+    const ev = calcEvalExpr(q);
+    if(!isFinite(ev)) continue;                       // 算式无法解析 → 废题
+    if(ev < 0) continue;                              // 提示词要求不出负数，模型违规 → 废题
+    ps.push({ q, a: Math.round(ev*1000000)/1000000 });
+    if(ps.length >= count) break;
+  }
+  return ps;
 }
 async function genCalcOnline(grade, semester, count, unitIndex){
   const prompt = calcOnlinePrompt(grade, semester, count, unitIndex);
@@ -9098,7 +9278,15 @@ async function genCalcOnline(grade, semester, count, unitIndex){
   const timer = setTimeout(()=>ctrl.abort(), LLM_CFG.timeout);
   try{
     const out = await llmChat(prompt, 0.7);   // 前端直连大模型，返回解析后的 JSON 对象
-    return llmValidateCalc(out, count);
+    const ps = llmValidateCalc(out, count);
+    /* 复核废题过多导致不足 count：用本地生成器按同单元题型补齐，保证题量（2026-09-22） */
+    if(ps.length < count){
+      const bad = count - ps.length;
+      const kinds = calcKindsForUnit(grade, semester, unitIndex);
+      while(ps.length < count) ps.push(genCalcProblems(grade, semester, 1, kinds)[0]);
+      showToast('⚠️ ' + bad + ' 道题复核未通过，已用本地题库补齐');
+    }
+    return ps;
   } finally { clearTimeout(timer); }
 }
 async function startCalc(){
@@ -9148,7 +9336,7 @@ function renderCalc(){
   for(let gi=start; gi<end; gi++){
     const p = calcProblems[gi];
     const mark = calcSubmitted
-      ? (calcCorrect[gi] ? `<span class="c-mark ok">✅</span>` : `<span class="c-mark no">❌ ${calcFmt(p.a)}</span>`)
+      ? (calcCorrect[gi] ? `<span class="c-mark ok">✅</span>` : `<span class="c-mark no">❌ 你的：${esc((calcInputs[gi]||'').trim()||'没填')}　正确：${calcFmt(p.a)}</span>`)
       : '';
     const val = (calcInputs[gi]!=null && calcInputs[gi]!=='') ? ` value="${esc(calcInputs[gi])}"` : '';
     html += `<div class="calc-row">
@@ -9173,7 +9361,11 @@ function renderCalc(){
     html += `<div class="quiz-result ${correct===calcProblems.length?'all':''}">
       <div class="r-score">你答对了 <b>${correct}</b> / ${calcProblems.length} 题</div>
       <div class="r-msg">${correct===calcProblems.length?'🎉 全对！计算小能手！':'继续加油，多练计算会更棒！'}　💎 本次获得 <b>${gain}</b> 积分</div>
-      ${quizExplainHtml('答错的题目已经用 ❌ 标出，红字就是正确的得数，对照着再算一遍会更熟练哦～')}
+      ${wrong>0
+        ? `<div class="r-wrong-list"><div class="rwl-title">📝 错题解析（${wrong} 道）</div>${calcProblems.map((p,i)=>!calcCorrect[i]
+            ? `<div class="r-wrong-item"><span class="rwi-q">${i+1}. ${esc(p.q)} = ？</span><span class="rwi-a">你的答案：${esc((calcInputs[i]||'').trim()||'（没填）')} · 正确答案：${calcFmt(p.a)}</span><span class="rwi-exp">💡 ${esc(calcExplain(p))}</span></div>`
+            : '').join('')}</div>`
+        : quizExplainHtml('🎉 全部答对，一个不错，计算真棒！')}
       <div class="r-btns">
         ${wrong>0 ? `<button class="btn" id="calcWrong">🔁 错题重写 (${wrong}道)</button>` : ''}
         <button class="btn primary" id="calcRetry">🔄 再做一次</button>
@@ -9221,6 +9413,26 @@ function renderCalc(){
 function collectCalcInputs(){
   if(typeof main === 'undefined' || !main) return;
   main.querySelectorAll('.c-in').forEach(el=>{ calcInputs[+el.dataset.i] = el.value.trim(); });
+}
+/* 计算题错题解析：只用算式本身讲「怎么算」，不臆造；按题型给一句计算方法提示（2026-09-22） */
+function calcExplain(p){
+  if(!p || typeof p.q !== 'string') return '';
+  const q = p.q.trim();
+  const a = calcFmt(p.a);
+  const m2 = q.match(/^\s*([\d.]+)\s*([+\-×x*÷/])\s*([\d.]+)\s*$/);
+  if(m2){
+    const x = m2[1], op = m2[2], y = m2[3];
+    const hasDec = q.indexOf('.') >= 0;
+    let tip = '';
+    if(op === '+') tip = `${x} + ${y}：相同数位对齐，从个位加起，满十向前一位进一`;
+    else if(op === '-') tip = `${x} - ${y}：相同数位对齐，从个位减起，不够减就向前一位借一`;
+    else if(op === '×' || op === 'x' || op === '*') tip = `${x} × ${y}：用乘法口诀逐位相乘，再把各部分加起来`;
+    else tip = `${x} ÷ ${y}：想一想乘法口诀「几 ${y}」接近 ${x}，商就是 ${a}`;
+    if(hasDec) tip += '（有小数时注意小数点的位置）';
+    return tip + `，得数是 ${a}。`;
+  }
+  if(q.indexOf('(') >= 0) return `先算小括号里面的，再算括号外面的，一步一步来，最后得数是 ${a}。`;
+  return `把这道算式一步一步重新算一遍，正确得数是 ${a}。`;
 }
 function retryWrong(){
   const wrongIdx = [];
@@ -9294,14 +9506,14 @@ function getLLMKey(){
 }
 function llmBuildPrompt(grade, subject, edition, difficulty, semester, count) {
   const diffText = DIFFS.includes(difficulty) ? difficulty : '混合（简单/中等/困难都有）';
-  // 英语：不走教材版本，改为「语法为主 + 当前年级可接受词汇量」，按需配图
+  // 英语：语法为主，但词汇量/进度参照译林版（译林出版社）教材，按需配图
   if(subject === '英语'){
     return `你是一位经验丰富、严谨的小学${grade}年级英语老师，出题前会先思考并核对正确答案，确保选项唯一且准确。
 请出 ${count} 道适合小学${grade}年级、难度为「${diffText}」的英语单项选择题（单选，3 个选项）。
 要求：
-1. 题目必须以「语法」为主：例如冠词 a/an/the 的用法、名词单复数、人称代词、be 动词、一般现在时/现在进行时、介词、形容词比较级、疑问句语序、there be 句型、祈使句等；可结合贴近生活的简单句子，但所有用词必须严格控制在小学${grade}年级学生**可接受的基础词汇量**内，不出现超纲难词。
+1. 题目必须以「语法」为主：例如冠词 a/an/the 的用法、名词单复数、人称代词、be 动词、一般现在时/现在进行时、介词、形容词比较级、疑问句语序、there be 句型、祈使句等；可结合贴近生活的简单句子，但所有用词必须严格控制在小学${grade}年级学生**可接受的基础词汇量**内，不出现超纲难词。词汇量与语法进度请参照「译林版（译林出版社）小学英语」${grade}年级${semester}教材，不超出该册书已学范围。
 1.5 出题前请先确定唯一正确答案，再据其编写三个选项，确保 a 指向的选项确实是正确答案；生成后请逐题自检一遍。
-2. 不依赖任何特定教材、课本版本，也不需要贴合某册课本进度，只需符合该年级孩子的普遍英语水平。
+2. 教材版本为「译林版（译林出版社）小学英语」：生词与语法点应在该年级译林版教材已学范围或常见拓展内，不依赖其他版本教材的进度。
 3. 每题 3 个选项，正确答案唯一；a 为正确选项下标（0/1/2）。
 4. 每题都必须给出 exp 字段：用孩子能懂的话写一句「解析」，必须先说清**为什么选这个选项**（例如“因为……，所以选「正确选项」”），再点出本题关键语法点；**不要只写“答案是X”**，要让看解析的孩子明白选它的理由。
 5. 只返回 JSON，不要任何解释文字，不要输出思考过程，不要使用 markdown 代码块。格式严格如下：
@@ -9316,7 +9528,7 @@ function llmBuildPrompt(grade, subject, edition, difficulty, semester, count) {
 1. 题目必须严格限定在「${grade}年级${semester}」的${edition}${subject}教材已学范围内，不得超出本学期进度（例如上学期不得出下学期才学的内容），且符合中国小学课程标准，内容准确、无歧义、适合小学生。
 1.5 出题前请先思考/计算出唯一正确答案，再据其编写选项并确定 a，确保 a 指向的选项确实是正确答案；数学题请先算出正确结果再选；生成后请逐题自检一遍。
 2. 每题 3 个选项，正确答案唯一；a 为正确选项下标（0/1/2）。
-3. 每题都必须给出 exp 字段：用孩子能懂的话写一句「解析」，必须先说清**为什么选这个选项**（例如“因为……，所以选「正确选项」”），并点出关键知识点；**不要只写“答案是X”**，要让看解析的孩子明白选它的理由。
+3. 每题都必须给出 exp 字段：用孩子能懂的话写一句「解析」，必须先说清**为什么选这个选项**（例如“因为……，所以选「正确选项」”），并点出关键知识点；**不要只写“答案是X”**，要让看解析的孩子明白选它的理由。解析中**禁止用 A/B/C 等字母代号指代选项**，必须直接写出正确选项的文字内容。
 4. 只返回 JSON，不要任何解释文字，不要输出思考过程，不要使用 markdown 代码块。格式严格如下：
 {"questions":[{"q":"题目文字","o":["选项A","选项B","选项C"],"a":0,"diff":"${diffText}","exp":"一句话解析（说明正确选项及关键知识点）"}]}
 确保 questions 数组长度正好为 ${count}。`;
@@ -9611,7 +9823,7 @@ function learnListHtml(){
       <select id="calcUnit" class="calc-unit-sel">${unitOpts}</select>
       <span class="cu-meta">${calcMeta}</span>
     </div>`;
-  html += `<p class="learn-tip">💡 出题方式可自由切换：<b>📚本地题库</b>从内置题库随机抽取并打乱选项；<b>🤖大模型</b>由当前所选的 <b>${curLLM.emoji}${curLLM.name}</b>（${curLLM.model}）按「${gradeName(grade)}·${semester}·语文人教版 / 数学苏教版 / 英语（语法）」现场生成 10 道可批改题（错题带解析），失败自动回退本地题库；<b>🧮数学计算</b>在「🤖大模型」模式下由 AI 按苏教版 ${gradeName(grade)}·${semester} 进度<b>联网生成 50 道计算题</b>（失败自动回退本地），「📚本地题库」模式下为本地随机出题；计算题可在上方<b>选择具体单元</b>专项练习（联网模式按苏教版该单元精准出题，本地模式尽量匹配题型）。</p>`;
+  html += `<p class="learn-tip">💡 出题方式可自由切换：<b>📚本地题库</b>从内置题库随机抽取并打乱选项；<b>🤖大模型</b>由当前所选的 <b>${curLLM.emoji}${curLLM.name}</b>（${curLLM.model}）按「${gradeName(grade)}·${semester}·语文人教版 / 数学苏教版 / 英语译林版」现场生成 10 道可批改题（错题带解析），失败自动回退本地题库；<b>🧮数学计算</b>在「🤖大模型」模式下由 AI 按苏教版 ${gradeName(grade)}·${semester} 进度<b>联网生成 50 道计算题</b>（失败自动回退本地），「📚本地题库」模式下为本地随机出题；计算题可在上方<b>选择具体单元</b>专项练习（联网模式按苏教版该单元精准出题，本地模式尽量匹配题型）。</p>`;
   return html;
 }
 
@@ -9879,7 +10091,8 @@ function renderPoem(){
     const detail = poemMode==='sentence'
       ? `（整句${poemSentResult?'✅':'❌'} · 作者${poemAuthorOk?'✅':'❌'}）`
       : `（填对 ${poemResults.filter(Boolean).length}/${poemBlanks.length} · 作者${poemAuthorOk?'✅':'❌'}）`;
-    resultBlock = `<div class="poem-result"><div class="poem-score">得分 <b>${poemScore}</b> 分${detail}</div><div class="poem-stars">${stars}</div><div class="poem-msg">${msg}</div></div>`;
+    resultBlock = `<div class="poem-result"><div class="poem-score">得分 <b>${poemScore}</b> 分${detail}</div><div class="poem-stars">${stars}</div><div class="poem-msg">${msg}</div></div>`
+      + (!poemAuthorOk ? quizExplainHtml(`《${esc(item.title)}》的作者是「${esc(item.author)}」。`) : '');
   }
   main.innerHTML = `
     <div class="page-head"><h1 class="page-title">📜 语文古诗小达人</h1><button class="back-btn" id="poemBack">‹ 返回</button></div>
@@ -10028,9 +10241,9 @@ async function loadEnglish(){
 /* 大模型联网生成一篇适合当前年级的英语小短文 + 重点单词（含中文释义），返回 {title,text,words:[{en,zh}]} */
 async function genEnglishModel(){
   const g = gradeName(grade);
-  const prompt = `你是一位小学英语老师。请为${g}（中国小学${grade}年级）生成一篇简短的英语小短文，用于单词学习。
+  const prompt = `你是一位小学英语老师，使用译林版（译林出版社）小学英语教材。请为${g}（中国小学${grade}年级，${semester}）生成一篇简短的英语小短文，用于单词学习。
 要求：
-1. 短文主题贴近小学生日常生活，句子简单，长度约 4-6 句英文。
+1. 短文主题贴近小学生日常生活，句子简单，长度约 4-6 句英文；用词与句型参照译林版小学英语${grade}年级${semester}教材的进度，不出现明显超纲词汇。
 2. 从短文中挑出 5-6 个重点生词/关键词（避开 a、the、I、is、my、we 等过于常见的词），给出每个词的英文和中文意思。
 3. 只输出 JSON，格式严格如下（不要任何解释、不要 markdown 代码块）：
 {"title":"短文英文标题","text":"完整英文短文，句子之间用句号分隔","words":[{"en":"英文单词","zh":"中文意思"}]}
@@ -10230,9 +10443,11 @@ function renderQuiz(test){
             return `<button class="${cls}" data-q="${qi}" data-o="${oi}">${esc(op)}</button>`;
           }).join('')}
         </div>
-        ${quizSubmitted && quizSel[qi]!==item.a ? `
+        ${quizSubmitted ? `
         <div class="q-exp">
-          <div class="q-exp-ans">❌ 你选了「${esc(item.o[quizSel[qi]])}」，正确答案是「${esc(item.o[item.a])}」</div>
+          ${quizSel[qi]===item.a
+            ? `<div class="q-exp-ans ok">✅ 答对了，就是「${esc(item.o[item.a])}」</div>`
+            : `<div class="q-exp-ans">❌ 你选了「${esc(item.o[quizSel[qi]])}」，正确答案是「${esc(item.o[item.a])}」</div>`}
           ${(item.exp || choiceExplain(item)) ? `<div class="q-exp-text">💡 解析：${esc(item.exp || choiceExplain(item))}</div>` : ''}
         </div>` : ''}
       </div>`;
@@ -10240,10 +10455,15 @@ function renderQuiz(test){
   if(quizSubmitted){
     const correct = test.qs.filter((item,qi)=>quizSel[qi]===item.a).length;
     const allRight = correct===test.qs.length;
+    const wrongList = test.qs.map((item,qi)=>({item,qi})).filter(x=>quizSel[x.qi]!==x.item.a);
     html += `
       <div class="quiz-result ${allRight?'all':''}">
         <div class="r-score">你答对了 <b>${correct}</b> / ${test.qs.length} 题</div>
         <div class="r-msg">${allRight?'🎉 全对！你真是小学霸！' : '继续加油，再练一次会更棒！'}</div>
+        ${wrongList.length ? `<div class="r-wrong-list"><div class="rwl-title">📝 错题回顾（${wrongList.length} 道，上面每题都有解析）</div>${wrongList.map(x=>{
+          const wrongTxt = quizSel[x.qi]!=null ? esc(x.item.o[quizSel[x.qi]]) : '（没选）';
+          return `<div class="r-wrong-item"><span class="rwi-q">第 ${x.qi+1} 题 · ${esc(String(x.item.q).slice(0,26))}${String(x.item.q).length>26?'…':''}</span><span class="rwi-a">你选「${wrongTxt}」→ 正确「${esc(x.item.o[x.item.a])}」</span></div>`;
+        }).join('')}</div>` : ''}
         <div class="r-btns">
           <button class="btn primary" id="quizRetry">🔄 再做一次</button>
           <button class="btn cancel" id="quizBack2">返回列表</button>
@@ -13013,7 +13233,7 @@ function applySyncState(obj){
     }
     /* 庄园/宠物/换装/小游戏/放松板块按用户要求纯本地、不同步：此处不再应用远端，避免覆盖本机本地进度 */
     /* 标量元数据(年级/学期/PIN)按 ts 取较新收敛：gTs/sTs/pTs 中较大者胜；旧版/双方均未改(gTs=0 且本地 gradeTs=0)时退回 last-applied 兼容 */
-    if(obj.grade != null){ const _gt = Number(obj.gTs)||0; if((_gt===0 && gradeTs===0) || _gt > gradeTs){ grade = obj.grade; if(_gt>gradeTs) gradeTs = _gt; try { localStorage.setItem(GKEY, grade); } catch(e){} } }
+    if(obj.grade != null){ const _gt = Number(obj.gTs)||0; if((_gt===0 && gradeTs===0) || _gt > gradeTs){ const _oldGrade = grade; grade = obj.grade; if(_gt>gradeTs) gradeTs = _gt; try { localStorage.setItem(GKEY, grade); } catch(e){} if(_oldGrade !== grade) onGradeChanged(); } }
     if(obj.semester != null){ const _st = Number(obj.sTs)||0; if((_st===0 && semTs===0) || _st > semTs){ semester = obj.semester; if(_st>semTs) semTs = _st; try { localStorage.setItem(SKEY, semester); } catch(e){} } }
     if(obj.pin != null){ const _pt = Number(obj.pTs)||0; if((_pt===0 && pinTs===0) || _pt > pinTs){ try { setPin(String(obj.pin)); } catch(e){} if(_pt>pinTs) pinTs = _pt; } } // 家长密码按 ts 取较新，各端保持一致
     if(obj.timetable && typeof obj.timetable === 'object' && !isLegacyDefaultTT(obj.timetable)){   // 课程表：按 ttTs 取较新，最后编辑者胜；远端旧示例课表不采纳（避免覆盖真实课表）
