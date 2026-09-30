@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609166" />
+<meta name="build-version" content="202609172" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1504,6 +1504,37 @@
   .badge-wall.collapsed { display:none; }
   .badge-group-t { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:#7a3a5a; margin-bottom:2px; }
   .badge-group-n { font-size:12px; font-weight:700; color:#9a8a96; background:var(--accent-soft); border-radius:999px; padding:1px 8px; }
+  /* ===== 校内作业 ===== */
+  .hw-item { background:var(--card); border-radius:14px; padding:10px 12px; box-shadow:var(--shadow); margin-bottom:8px; }
+  .hw-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .hw-sub { font-size:11px; font-weight:800; color:var(--title); background:var(--accent-soft); border-radius:999px; padding:2px 8px; white-space:nowrap; }
+  .hw-title { font-size:14px; font-weight:800; color:var(--ink); }
+  .hw-detail { font-size:12.5px; color:var(--nav-ink-soft); margin-top:4px; line-height:1.5; }
+  .hw-actions { display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap; }
+  .hw-dict-btn { border:none; border-radius:999px; padding:5px 14px; font-size:12.5px; font-weight:800; color:#fff; background:var(--accent); cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,.15); }
+  .hw-dict-btn:active { transform:scale(.95); }
+  .hw-dict-res { font-size:11.5px; color:var(--nav-ink-soft); }
+  .hw-ed { border:1.5px dashed var(--icon-border,var(--accent-soft)); border-radius:14px; padding:10px; margin-bottom:10px; background:var(--accent-hover); }
+  .hw-ed-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px; align-items:center; }
+  .hw-ed input,.hw-ed select,.hw-ed textarea { border:1.5px solid var(--accent-soft); border-radius:10px; padding:6px 8px; font-size:13px; font-family:inherit; background:var(--card); color:var(--ink); }
+  .hw-ed input[type=text] { flex:1; min-width:120px; }
+  .hw-ed textarea { width:100%; min-height:44px; resize:vertical; box-sizing:border-box; }
+  .hw-ed-btns { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
+  .hw-photo-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px; }
+  .hw-thumb { width:44px; height:44px; object-fit:cover; border-radius:10px; border:2px solid var(--accent-soft); box-shadow:0 2px 6px rgba(0,0,0,.12); }
+  .hw-photo-hint { font-size:11px; color:var(--ink-soft, #999); }
+  .hw-date-row { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .hw-date-row input[type=date] { border:1.5px solid var(--accent-soft); border-radius:10px; padding:6px 8px; font-size:13px; font-family:inherit; background:var(--card); color:var(--ink); }
+  /* 听写弹窗 */
+  .hw-dict-mask { position:fixed; inset:0; background:rgba(40,30,50,.45); z-index:210; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .hw-dict-pop { background:var(--card); border-radius:20px; padding:18px; width:min(420px,94vw); box-shadow:0 18px 48px rgba(0,0,0,.3); text-align:center; }
+  .hw-dict-prog { font-size:12px; color:var(--nav-ink-soft); font-weight:700; }
+  .hw-dict-word { font-size:20px; font-weight:900; color:var(--title); margin:10px 0 2px; min-height:28px; }
+  .hw-dict-input { width:min(260px,80vw); font-size:18px; text-align:center; padding:10px; border-radius:12px; border:2px solid var(--accent-soft); font-family:inherit; outline:none; }
+  .hw-dict-fb { min-height:24px; font-weight:800; margin:6px 0; font-size:14px; }
+  .hw-dict-btns { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
+  .hw-dict-score { font-size:26px; font-weight:900; color:var(--title); }
+  .hw-dict-wrong { font-size:13px; color:var(--ink); line-height:1.7; margin-top:8px; }
   /* ===== 课程表 ===== */
   .tt-today { background:linear-gradient(135deg,var(--accent-soft),#fff); border:2px solid var(--accent-soft); border-radius:14px; padding:10px 14px; font-size:14px; font-weight:700; color:#7a3a5a; margin:10px 0 12px; line-height:1.6; }
   .tt-today .tt-none { color:#9a8a96; font-weight:600; }
@@ -4273,6 +4304,7 @@ function renderHome(){
   main.querySelectorAll('.gd-rec-btn').forEach(b=>{ b.onclick = ()=> openRecoverModal(b.dataset.kind); });
 
   const tl = document.getElementById('todayList');
+  try { prependHwHome(tl, today.iso); } catch(e){ console.error('[hw] 首页作业区渲染异常', e); }   // 📚 今日校内作业：在 📌 今日任务 上方
   const hint = document.createElement('div');
   hint.className = 'section-h';
   hint.style.marginTop = '22px';
@@ -9994,6 +10026,168 @@ async function llmJson(prompt) {
   return await llmChat(prompt, 0.9);
 }
 
+/* ===== 作业图片识别（视觉模型）：拍作业本照片 → AI 读图自动填写科目/名称/明细/词表 ===== */
+const HW_VL_MODEL = 'Qwen/Qwen3-VL-32B-Instruct';   // SiliconFlow 视觉模型，与对话模型同一 Key
+async function llmVision(imageDataUrl, prompt){
+  const key = getLLMKey();
+  if (!key) throw new Error('未配置大模型密钥');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    const body = {
+      model: HW_VL_MODEL,
+      messages: [
+        { role: 'system', content: '你是严谨的小学作业识别助手，只输出合法 JSON，不要任何解释或思考过程。' },
+        { role: 'user', content: [
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+          { type: 'text', text: prompt }
+        ]}
+      ],
+      temperature: 0.2,
+      max_tokens: 800,
+      chat_template_kwargs: { enable_thinking: false }
+    };
+    const resp = await fetch(getProvider().base + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      signal: ctrl.signal,
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error('视觉模型 HTTP ' + resp.status + (txt ? (': ' + txt.slice(0, 160)) : ''));
+    }
+    const data = await resp.json();
+    const content = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
+    if (!content) throw new Error('视觉模型返回为空');
+    return llmExtractJSON(content);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+/* 图片压缩：最长边 1100px、JPEG 0.72，失败时退回原图 base64 */
+function hwCompressImage(file, maxSide, quality){
+  return new Promise((resolve, reject) => {
+    if(!file) return reject(new Error('no file'));
+    const MAX = maxSide || 1100, Q = quality || 0.72;
+    let settled = false;
+    const done = v => { if(!settled){ settled = true; resolve(v); } };
+    setTimeout(() => done(String(fr && fr.result || '')), 6000);   // 环境不支持 Image 解码时兜底直出原图
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error('读取图片失败'));
+    fr.onload = () => {
+      const dataUrl = String(fr.result || '');
+      try {
+        const img = new Image();
+        img.onerror = () => done(dataUrl);
+        img.onload = () => {
+          try {
+            const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+            const cv = document.createElement('canvas');
+            cv.width = Math.max(1, Math.round(img.width * scale));
+            cv.height = Math.max(1, Math.round(img.height * scale));
+            cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+            done(cv.toDataURL('image/jpeg', Q));
+          } catch(e) { done(dataUrl); }
+        };
+        img.src = dataUrl;
+      } catch(e) { done(dataUrl); }
+    };
+    fr.readAsDataURL(file);
+  });
+}
+/* 编辑卡「拍照识别」入口：压缩 → 视觉模型 → 回填 */
+async function hwEditorPhoto(i, file, btn){
+  const it = hwEdit && hwEdit.items[i];
+  if(!it || !file) return;
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '📷 识别中…';
+  try {
+    const dataUrl = await hwCompressImage(file, 1100, 0.72);
+    it._img = dataUrl;
+    try { it._imgSave = await hwCompressImage(file, 900, 0.55); } catch(e) { it._imgSave = dataUrl; }   // 存档版：随作业同步，孩子听写完可查看
+    renderHwEditor();
+    const card = document.querySelector(`.hw-ed[data-hwi="${i}"] [data-act=vision]`);
+    const vBtn = card || btn;
+    vBtn.disabled = true; vBtn.textContent = '🔍 AI 识别中…';
+    const gName = (typeof gradeName === 'function') ? gradeName(grade) : '小学';
+    const out = await llmVision(dataUrl,
+`这是家长拍的小学生${gName}校内作业的照片（可能是作业本、练习册、试卷或老师布置的作业单）。
+请识别照片里的**每一项作业**并逐项拆分，只输出 JSON：{"tasks":[{"sub":"语文|数学|英语|科学|其他","title":"作业名称（20字内，例如：第3课生词抄写 / 口算第12页）","detail":"完成要点说明（面向孩子、友好鼓励、80字内，说清楚怎么做到位）","dict":["听写词或单词"]}]}
+规则：
+1. 照片里有几项独立作业就拆成几个对象，只有一项时 tasks 长度为 1。
+2. **同一科目下若有编号的多个小任务（一、二、三 / 1、2、3 / 第一题、第二题），每个小任务必须单独一个对象**，sub 相同，title 保留编号和内容（如"一、抄写生词"），不要合并成一项。
+3. sub 从给定五选一；某项若含明显词语/单词列表或属听写类作业，其 dict 给出 10 个左右的词，否则 dict 为空数组 []。`);
+    if(out && typeof out === 'object'){
+      // 兼容两种返回：拆分 tasks 数组 / 旧版单任务对象
+      const arr = Array.isArray(out.tasks) && out.tasks.length ? out.tasks
+        : (out.title ? [out] : null);
+      if(arr){
+        const savedImg = it._imgSave || '';
+        const mk = (t, idx) => {
+          const item = {
+            id: idx === 0 ? (it.id || ('hw' + Date.now() + Math.floor(Math.random()*100))) : ('hw' + Date.now() + Math.floor(Math.random()*1000)),
+            sub: (t.sub && HW_SUBJECTS.includes(String(t.sub))) ? String(t.sub) : (it.sub || '其他'),
+            title: String(t.title || '').slice(0, 40),
+            detail: String(t.detail || '').slice(0, 300),
+            dict: (Array.isArray(t.dict) && t.dict.length) ? { words: t.dict.map(w=>String(w).trim()).filter(Boolean).slice(0, 15) } : null
+          };
+          if(idx === 0) item._img = it._img;                       // 编辑卡预览
+          if(item.dict && savedImg) item.img = savedImg;           // 听写项挂照片，孩子听写完可查看
+          return item;
+        };
+        const items = arr.slice(0, 8).map((t, idx) => mk(t && typeof t === 'object' ? t : {}, idx)).filter(x => x.title);
+        if(items.length){
+          hwVisionConfirm(items, i, it);   // 识别结果先弹窗确认，家长勾选后再填入
+        } else showToast('⚠️ 未能识别出作业内容，请手动填写');
+      } else showToast('⚠️ 未能识别出作业内容，请手动填写');
+    } else {
+      showToast('⚠️ 未能识别出作业内容，请手动填写');
+    }
+  } catch(e) {
+    showToast('⚠️ 图片识别失败，请检查网络后重试');
+  }
+  renderHwEditor();
+}
+/* 识别结果确认弹窗：逐条勾选（默认全选），确认后才替换原卡 */
+function hwVisionConfirm(items, i, origItem){
+  const old = document.getElementById('hwVisionMask');
+  if(old) old.remove();
+  const mask = document.createElement('div');
+  mask.className = 'hw-dict-mask'; mask.id = 'hwVisionMask';
+  mask.innerHTML = `<div class="hw-dict-pop" style="max-width:420px;text-align:left;">
+    <div style="font-weight:700;margin-bottom:6px;">📷 识别结果确认（${items.length} 项）</div>
+    <div style="font-size:12px;color:var(--nav-ink-soft,#888);margin-bottom:8px;">勾选要填入的作业，取消勾选的将被忽略：</div>
+    <div id="hwVisionList" style="max-height:46vh;overflow:auto;display:flex;flex-direction:column;gap:6px;">
+      ${items.map((x, k) => `<label style="display:flex;gap:8px;align-items:flex-start;background:rgba(0,0,0,.04);border-radius:10px;padding:8px 10px;cursor:pointer;">
+        <input type="checkbox" data-vk="${k}" checked style="margin-top:3px;width:17px;height:17px;accent-color:var(--accent-d);">
+        <span style="flex:1;"><b style="color:var(--accent-d);">${esc(x.sub)}</b> ${esc(x.title)}
+          ${x.detail ? `<span style="display:block;font-size:12px;color:var(--nav-ink-soft,#888);margin-top:2px;">${esc(x.detail).slice(0, 60)}</span>` : ''}
+          ${(x.dict && x.dict.words) ? `<span style="display:block;font-size:12px;color:#5aa06a;margin-top:2px;">词表 ${x.dict.words.length} 个</span>` : ''}
+        </span>
+      </label>`).join('')}
+    </div>
+    <div class="hw-dict-btns" style="margin-top:12px;justify-content:center;">
+      <button class="hw-dict-btn" id="hwVisionOk" style="background:var(--accent-d);">✅ 确认填入</button>
+      <button class="hw-dict-btn" id="hwVisionCancel" style="background:#9a8a96;">✖️ 取消</button>
+    </div>
+  </div>`;
+  document.body.appendChild(mask);
+  const close = ()=>{ mask.remove(); renderHwEditor(); };
+  document.getElementById('hwVisionOk').onclick = ()=>{
+    const checked = [...mask.querySelectorAll('[data-vk]')].filter(c => c.checked).map(c => items[Number(c.dataset.vk)]);
+    if(!checked.length){ try{ showToast('至少勾选一项哦～'); }catch(e){} return; }
+    hwEdit.items.splice(i, 1, ...checked);   // 家长确认后才替换原卡
+    mask.remove();
+    try{ showToast(checked.length > 1 ? `✅ 已填入 ${checked.length} 项作业，可继续修改` : '✅ 已填入，可继续修改'); }catch(e){}
+    renderHwEditor();
+  };
+  document.getElementById('hwVisionCancel').onclick = ()=>{
+    delete origItem._img; delete origItem._imgSave;   // 取消 → 撤掉照片预览，原卡保持原样
+    close();
+  };
+}
+
 /* 英语大模型题配图：走「当前所选供应商」的 base（千问/DeepSeek 同为 SiliconFlow 通道），
    文生图固定使用 Kwai-Kolors/Kolors（对话模型不具备出图能力），URL 约 1 小时有效，懒加载，失败隐藏。 */
 const imgCache = new Map();
@@ -10939,6 +11133,7 @@ function renderPublish(type){
   const sl = document.getElementById('selList');
   if(!selTasks.length){ sl.innerHTML = `<div class="day-empty">这一天还没有任务～</div>`; }
   else selTasks.forEach(t=> sl.appendChild(taskBlock(t, selDay, true, true)));   // 校内/家庭作业：简洁卡片（仅名称）
+  if(isSchool){ try { appendHwSchoolDay(selISO); } catch(e){ console.error('[hw] 校内页作业渲染异常', e); } }   // 📚 校内作业同步显示在对应日期
   // 星期标签切换
   main.querySelectorAll('.day-tab').forEach(b=>{
     b.onclick = ()=>{ selDayIdx = Number(b.dataset.i); render(); };
@@ -12644,6 +12839,15 @@ function renderParent(){
       </div>
     </section>
 
+    <section class="collapse-panel" data-pid="homework" data-open="${openPanels.has('homework')?'true':'false'}">
+      <button class="collapse-head" type="button" data-pid="homework"><span class="ch-title">📚 校内作业</span><span class="ch-chevron">▸</span></button>
+      <div class="collapse-body">
+        <p class="page-sub" style="margin-top:0;">布置每天的校内作业：写好科目和作业名称保存后，AI 会自动生成作业明细；标题含「听写/生词/单词」时 AI 还会自动出听写词表，孩子端首页和「校内任务」对应日期都会显示，并可点 🎧 自动听写。</p>
+        <div class="hw-date-row">📅 日期 <input type="date" id="hwDate"></div>
+        <div id="hwEditBox"></div>
+      </div>
+    </section>
+
     <section class="collapse-panel" data-pid="weekly" data-open="${openPanels.has('weekly')?'true':'false'}">
       <button class="collapse-head" type="button" data-pid="weekly"><span class="ch-title">📊 每周报告</span><span class="ch-chevron">▸</span></button>
       <div class="collapse-body" id="weeklyBody">${weeklyReportHtml()}</div>
@@ -12973,8 +13177,342 @@ function renderParent(){
   mountMyTasks();
   // 挂载「亲子挑战」模块
   mountFamily();
+  // 挂载「校内作业」编辑模块
+  try { bindHwEditor(); } catch(e){ console.error('[hw] 编辑器挂载异常', e); }
   /* 同步诊断面板：填充本机状态 + 绑定自救按钮 */
   bindDiag();
+}
+
+/* ===== 校内作业：数据 + 首页/校内页展示 + 家长编辑 + AI 明细 + 听写任务 ===== */
+const HW_KEY = 'kidtask_hw_v1';
+const HW_TS_KEY = 'kidtask_hw_ts_v1';
+const HW_RESULT_KEY = 'kidtask_hw_result_v1';   // 听写结果：纯本地（孩子端），不跨端同步
+function loadHW(){
+  try{ const o = JSON.parse(localStorage.getItem(HW_KEY)); return (o && typeof o==='object' && !Array.isArray(o)) ? o : {}; }catch(e){ return {}; }
+}
+let hw = loadHW();
+let hwTs = Number(localStorage.getItem(HW_TS_KEY)) || 0;
+function touchHwTs(){
+  hwTs = Math.max(hwTs + 1, Date.now());
+  try{ localStorage.setItem(HW_TS_KEY, String(hwTs)); }catch(e){}
+  try{ logicalTs = Math.max(logicalTs, hwTs); localStorage.setItem('kidtask_sync_ts', String(logicalTs)); }catch(e){}
+}
+function saveHW(){
+  try{ localStorage.setItem(HW_KEY, JSON.stringify(hw)); }catch(e){}
+  touchHwTs();
+  try{ pushSync(); }catch(e){}
+}
+function hwItems(iso){ const d = hw[iso]; return (d && Array.isArray(d.items)) ? d.items : []; }
+function hwResult(iso, itemId){
+  try{ const o = JSON.parse(localStorage.getItem(HW_RESULT_KEY)); return o && o[iso] && o[iso][itemId]; }catch(e){ return undefined; }
+}
+function saveHwResult(iso, itemId, res){
+  let o = {}; try{ o = JSON.parse(localStorage.getItem(HW_RESULT_KEY)) || {}; }catch(e){}
+  if(!o[iso]) o[iso] = {};
+  o[iso][itemId] = res;
+  try{ localStorage.setItem(HW_RESULT_KEY, JSON.stringify(o)); }catch(e){}
+}
+const HW_SUBJECTS = ['语文','数学','英语','科学','其他'];
+const HW_SUB_EMOJI = { '语文':'📖','数学':'🔢','英语':'🔤','科学':'🔬','其他':'📚' };
+function hwSubEmoji(sub){ return HW_SUB_EMOJI[sub] || '📚'; }
+/* 单条作业卡片（首页/校内页通用；child 显示听写入口） */
+function hwItemCard(iso, it){
+  const res = hwResult(iso, it.id);
+  const isDict = it.dict && Array.isArray(it.dict.words) && it.dict.words.length > 0;
+  return `<div class="hw-item" data-hwid="${esc(it.id)}">
+    <div class="hw-top"><span class="hw-sub">${hwSubEmoji(it.sub)} ${esc(it.sub||'其他')}</span><span class="hw-title">${esc(it.title||'')}</span></div>
+    ${it.detail ? `<div class="hw-detail">${esc(it.detail)}</div>` : ''}
+    <div class="hw-actions">
+      ${isDict ? `<button class="hw-dict-btn" data-hwdict="${esc(it.id)}" data-hwdate="${esc(iso)}">🎧 开始听写</button>` : ''}
+      ${isDict ? `<span class="hw-dict-res">共 ${it.dict.words.length} 词</span>` : ''}
+      ${res ? `<span class="hw-dict-res">上次听写：${res.score}/${res.total} ${res.total>0&&res.score>=res.total*0.8?'🌟':''}</span>` : ''}
+    </div>
+  </div>`;
+}
+/* 首页：📚 今日校内作业（插在 📌 今日任务 之前） */
+function prependHwHome(tl, todayIso){
+  const items = hwItems(todayIso);
+  const hint = document.createElement('div');
+  hint.className = 'section-h';
+  hint.textContent = '📚 今日校内作业' + (items.length ? `（${items.length} 项）` : '');
+  hint.style.marginTop = '18px';
+  tl.appendChild(hint);
+  if(!items.length){
+    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty small', innerHTML:'<span class="big">🎒</span>今天暂无校内作业，家长可在「家长审核 → 📚 校内作业」布置～'}));
+    return;
+  }
+  const box = document.createElement('div');
+  box.innerHTML = items.map(it => hwItemCard(todayIso, it)).join('');
+  while(box.firstChild) tl.appendChild(box.firstChild);
+  bindHwDictBtns(tl);
+}
+/* 校内页：对应日期展示（插在当天任务面板之后） */
+function appendHwSchoolDay(selISO){
+  const items = hwItems(selISO);
+  const box = document.createElement('div');
+  box.innerHTML = `<div class="section-h" style="margin:18px 0 8px;">📚 校内作业（${selISO===fmtISO(new Date())?'今天':selISO}${items.length?` · ${items.length} 项`:''}）</div>` +
+    (items.length ? items.map(it => hwItemCard(selISO, it)).join('') : '<div class="day-empty">这一天暂无校内作业记录～</div>');
+  const sl = document.getElementById('selList');
+  if(sl && sl.parentNode) sl.parentNode.insertBefore(box, sl.nextSibling);
+  bindHwDictBtns(box);
+}
+function bindHwDictBtns(root){
+  root.querySelectorAll('.hw-dict-btn').forEach(b=>{
+    b.onclick = ()=> openDictation(b.dataset.hwdate, b.dataset.hwdict);
+  });
+}
+/* 家长端 AI 自动生成作业明细（保存时自动触发 + 卡片上可手动重生成） */
+function hwLocalDetail(it){
+  const m = { '语文':'先读题，书写工整，写完检查一遍生字笔画', '数学':'看清运算符号，列式计算，最后验算一遍', '英语':'大声朗读三遍再抄写，注意字母大小写和标点', '科学':'先观察再动笔，记录下你的发现', '其他':'认真完成，完成后自查一遍' };
+  return m[it.sub] || m['其他'];
+}
+function hwIsDictation(it){
+  return /听写|默写|生词|单词/.test(it.title || '') || (it.dict && it.dict.words && it.dict.words.length > 0);
+}
+async function hwAiDetail(iso, it){
+  const prompt = `请为小学${gradeName(grade)}学生布置的校内作业写一份完成要点说明。科目：${it.sub||'其他'}；作业名称：${it.title||''}。
+要求：语气友好鼓励、面向孩子、60字以内、说清楚"怎么做到位"（例如书写、检查、朗读等）。
+${hwIsDictation(it) ? '这份作业和听写有关，请同时出词表。' : ''}
+只输出 JSON：{"detail":"完成要点说明","dictWords":[]}
+其中 dictWords：${hwIsDictation(it) ? ('请给出 ' + ((it.sub==='英语') ? '10 个适合该年级的英语单词（不带中文）' : '10 个适合该年级的生字词')) : '留空数组 []'}。`;
+  const out = await llmChat(prompt, 0.4, 600);
+  if(out && typeof out === 'object'){
+    if(out.detail) it.detail = String(out.detail).slice(0, 300);
+    if(Array.isArray(out.dictWords) && out.dictWords.length){
+      it.dict = { words: out.dictWords.map(w => String(w).trim()).filter(Boolean).slice(0, 15) };
+    }
+  }
+}
+/* 家长编辑器状态（家长审核页内） */
+let hwEdit = null;   // { date:'YYYY-MM-DD', items:[...] }
+function hwEditLoad(dateISO){
+  const items = hwItems(dateISO).map(it => JSON.parse(JSON.stringify(it)));
+  hwEdit = { date: dateISO, items };
+}
+function hwEditDirtyDate(){
+  const inp = document.getElementById('hwDate');
+  return (inp && inp.value) ? inp.value : (new Date().toISOString().slice(0,10));
+}
+function renderHwEditor(){
+  const box = document.getElementById('hwEditBox');
+  if(!box || !hwEdit) return;
+  const rows = hwEdit.items.map((it, i) => `
+    <div class="hw-ed" data-hwi="${i}">
+      <div class="hw-ed-row">
+        <select data-f="sub">${HW_SUBJECTS.map(s=>`<option ${s===it.sub?'selected':''}>${s}</option>`).join('')}</select>
+        <input type="text" data-f="title" placeholder="作业名称，如：第3课生词听写" value="${esc(it.title||'')}">
+      </div>
+      <div class="hw-ed-row"><textarea data-f="detail" placeholder="作业明细（留空则保存时由 AI 自动生成）">${esc(it.detail||'')}</textarea></div>
+      <div class="hw-ed-row"><input type="text" data-f="dict" style="flex:1;min-width:160px;" placeholder="听写词表（逗号/空格分隔，可留空让 AI 出词）" value="${esc((it.dict&&it.dict.words||[]).join('、'))}"></div>
+      <div class="hw-ed-row hw-photo-row">
+        <button class="hw-dict-btn" data-act="vision" data-i="${i}">📷 拍照识别</button>
+        ${ (it._img || it.img) ? `<img class="hw-thumb" src="${it._img || it.img}" alt="作业图片">` : '' }
+        <span class="hw-photo-hint">拍作业本照片，AI 自动填写</span>
+        <input type="file" data-f="photo" accept="image/*" capture="environment" style="display:none;">
+      </div>
+      <div class="hw-ed-btns">
+        <button class="hw-dict-btn" data-act="ai" data-i="${i}">🤖 AI 生成明细</button>
+        <button class="hw-dict-btn" data-act="del" data-i="${i}" style="background:#c46a6a;">🗑️ 删除</button>
+      </div>
+    </div>`).join('');
+  box.innerHTML = (hwEdit.items.length ? rows : '<div class="day-empty">这一天还没有作业，点下面「➕ 添加一项」开始布置～</div>') + `
+    <div class="hw-ed-btns" style="margin-top:10px;">
+      <button class="parent-entry" id="hwAdd">➕ 添加一项</button>
+      <button class="parent-entry" id="hwSave">💾 保存并同步（AI 自动补明细）</button>
+    </div>`;
+  box.querySelectorAll('.hw-ed').forEach(card => {
+    const i = Number(card.dataset.hwi);
+    const it = hwEdit.items[i];
+    card.querySelector('[data-f=sub]').onchange = e => { it.sub = e.target.value; };
+    card.querySelector('[data-f=title]').oninput = e => { it.title = e.target.value; };
+    card.querySelector('[data-f=detail]').oninput = e => { it.detail = e.target.value; };
+    card.querySelector('[data-f=dict]').oninput = e => {
+      const words = e.target.value.split(/[、,，;；\s]+/).map(w=>w.trim()).filter(Boolean);
+      it.dict = words.length ? { words: words.slice(0,15) } : null;
+    };
+  });
+  box.querySelectorAll('[data-act=ai]').forEach(b => { b.onclick = ()=> hwEditorAi(Number(b.dataset.i), b); });
+  box.querySelectorAll('[data-act=del]').forEach(b => { b.onclick = ()=>{ hwEdit.items.splice(Number(b.dataset.i),1); renderHwEditor(); }; });
+  box.querySelectorAll('[data-act=vision]').forEach(b => {
+    b.onclick = ()=>{
+      const i = Number(b.dataset.i);
+      const inp = b.closest('.hw-ed').querySelector('[data-f=photo]');
+      if(inp){ inp.onchange = ()=>{ if(inp.files && inp.files[0]) hwEditorPhoto(i, inp.files[0], b); inp.value = ''; }; inp.click(); }
+    };
+  });
+  const add = document.getElementById('hwAdd');
+  if(add) add.onclick = ()=>{ hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub:'语文', title:'', detail:'', dict:null }); renderHwEditor(); };
+  const save = document.getElementById('hwSave');
+  if(save) save.onclick = ()=> hwEditorSave(save);
+}
+async function hwEditorAi(i, btn){
+  const it = hwEdit && hwEdit.items[i];
+  if(!it) return;
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '🤖 生成中…';
+  try {
+    await hwAiDetail(hwEdit.date, it);
+    showToast('✅ AI 已生成作业明细');
+  } catch(e) {
+    it.detail = it.detail || hwLocalDetail(it);
+    showToast('⚠️ AI 暂时不可用，已用本地模板生成');
+  }
+  btn.disabled = false; btn.textContent = old;
+  renderHwEditor();
+}
+async function hwEditorSave(saveBtn){
+  if(!hwEdit) return;
+  // 收集编辑器里可能未触发 oninput 的值
+  document.querySelectorAll('#hwEditBox .hw-ed').forEach(card => {
+    const it = hwEdit.items[Number(card.dataset.hwi)];
+    if(!it) return;
+    it.title = card.querySelector('[data-f=title]').value;
+    it.detail = card.querySelector('[data-f=detail]').value;
+    const dw = card.querySelector('[data-f=dict]').value.split(/[、,，;；\s]+/).map(w=>w.trim()).filter(Boolean);
+    it.dict = dw.length ? { words: dw.slice(0,15) } : it.dict;
+    it.sub = card.querySelector('[data-f=sub]').value;
+    if(it._imgSave) it.img = it._imgSave;   // 听写内容照片：随作业保存，孩子端可查看
+  });
+  hwEdit.items = hwEdit.items.filter(it => (it.title||'').trim());
+  // AI 自动补明细（最多补 5 条，避免等待过久）
+  const need = hwEdit.items.filter(it => !(it.detail||'').trim()).slice(0, 5);
+  if(need.length){
+    saveBtn.disabled = true; saveBtn.textContent = '🤖 AI 正在生成明细…';
+    for(const it of need){
+      try { await hwAiDetail(hwEdit.date, it); }
+      catch(e) { it.detail = hwLocalDetail(it); }
+    }
+    saveBtn.disabled = false; saveBtn.textContent = '💾 保存并同步（AI 自动补明细）';
+  }
+  hw[hwEdit.date] = { items: hwEdit.items.map(it => { const c = Object.assign({}, it, { id: it.id || ('hw' + Date.now() + Math.floor(Math.random()*100)) }); delete c._img; delete c._imgSave; return c; }), ts: Date.now() };
+  saveHW();
+  hwEditLoad(hwEdit.date);
+  renderHwEditor();
+  try { showToast('✅ 校内作业已保存并同步'); } catch(e){}
+  if(page==='home') render();
+}
+function bindHwEditor(){
+  const inp = document.getElementById('hwDate');
+  if(!inp) return;
+  if(!hwEdit) hwEditLoad(new Date().toISOString().slice(0,10));
+  inp.value = hwEdit.date;
+  inp.onchange = ()=>{ const d = inp.value || new Date().toISOString().slice(0,10); hwEditLoad(d); renderHwEditor(); };   // 切日期=查看/布置那天（未保存的修改会被丢弃）
+  renderHwEditor();
+}
+/* ===== 听写任务：TTS 自动报词 → 孩子输入 → 自动对错 → 成绩单 ===== */
+let hwDictState = null;
+function hwNormAns(w){ return String(w||'').trim().toLowerCase().replace(/\s+/g,''); }
+function hwSpeak(text, en){
+  try {
+    if(!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(text));
+    u.lang = en ? 'en-US' : 'zh-CN';
+    u.rate = en ? 0.75 : 0.85;
+    window.speechSynthesis.speak(u);
+  } catch(e){}
+}
+/* 听写报词：一个词连播两遍（TTS 队列自动排队，第二遍稍降速更清楚） */
+function hwSpeakTwice(text, en){
+  try {
+    if(!window.speechSynthesis){ hwSpeak(text, en); return; }
+    window.speechSynthesis.cancel();
+    const mk = rate => {
+      const u = new SpeechSynthesisUtterance(String(text));
+      u.lang = en ? 'en-US' : 'zh-CN';
+      u.rate = (en ? 0.75 : 0.85) * rate;
+      return u;
+    };
+    window.speechSynthesis.speak(mk(1));
+    window.speechSynthesis.speak(mk(0.92));
+  } catch(e){}
+}
+function openDictation(iso, itemId){
+  const it = hwItems(iso).find(x => x.id === itemId);
+  if(!it || !it.dict || !it.dict.words || !it.dict.words.length){ try{ showToast('这条作业没有词表哦～'); }catch(e){} return; }
+  const words = it.dict.words.slice();
+  hwDictState = { iso, itemId, title: it.title, words, idx: 0, answers: [], phase: 'input', img: it.img || null };
+  const mask = document.createElement('div');
+  mask.className = 'hw-dict-mask'; mask.id = 'hwDictMask';
+  mask.innerHTML = `<div class="hw-dict-pop">
+    <div class="hw-dict-prog" id="hdProg"></div>
+    <div class="hw-dict-word" id="hdWord">🎧</div>
+    <input class="hw-dict-input" id="hdInput" autocomplete="off" placeholder="听写在这里输入">
+    <div class="hw-dict-fb" id="hdFb"></div>
+    <div class="hw-dict-btns">
+      <button class="hw-dict-btn" id="hdPlay">🔊 再听一遍</button>
+      <button class="hw-dict-btn" id="hdSkip">跳过 ⏭️</button>
+      <button class="hw-dict-btn" id="hdOk" style="background:var(--accent-d);">提交 ✓</button>
+      <button class="hw-dict-btn" id="hdNext" style="background:var(--accent-d);display:none;">➡️ 下一个</button>
+      <button class="hw-dict-btn" id="hdQuit" style="background:#9a8a96;">结束</button>
+    </div>
+  </div>`;
+  document.body.appendChild(mask);
+  const $ = id => document.getElementById(id);
+  const st = hwDictState;
+  const curWord = () => st.words[st.idx];
+  const showProg = ()=>{ $('hdProg').textContent = `《${st.title||'听写'}》第 ${st.idx+1}/${st.words.length} 个`; };
+  const play = ()=>{ const w = curWord(); hwSpeakTwice(w, /[a-zA-Z]/.test(w)); };   // 每个词自动播两遍
+  const ask = ()=>{ st.phase = 'input'; showProg(); $('hdWord').textContent = '🎧 听'; $('hdInput').value=''; $('hdFb').textContent=''; $('hdFb').style.color='';
+    $('hdOk').style.display=''; $('hdSkip').style.display=''; $('hdNext').style.display='none'; $('hdInput').disabled = false;
+    setTimeout(play, 350); $('hdInput').focus(); };
+  const finish = ()=>{
+    st.phase = 'done';
+    const total = st.words.length;
+    let score = 0; const wrong = [];
+    st.words.forEach((w, i) => {
+      const ok = st.answers[i] != null && hwNormAns(st.answers[i]) === hwNormAns(w);
+      if(ok) score++; else wrong.push({ w, a: st.answers[i] == null ? '（跳过）' : st.answers[i] });
+    });
+    saveHwResult(st.iso, st.itemId, { score, total, wrong: wrong.map(x=>x.w), at: Date.now() });
+    mask.innerHTML = `<div class="hw-dict-pop">
+      <div class="hw-dict-score">${score>=total*0.8 ? '🎉' : '💪'} ${score} / ${total}</div>
+      <div class="hw-dict-fb" style="color:var(--title);">${score===total?'全对！太棒啦！':(score>=total*0.8?'听写很棒，继续加油！':'再练一练就会更棒～')}</div>
+      ${wrong.length ? `<div class="hw-dict-wrong">❌ 写错的词：${wrong.map(x=>`<b>${esc(x.w)}</b><span style="color:var(--nav-ink-soft);">（你写的：${esc(x.a)}）</span>`).join('、')}</div>` : ''}
+      <div class="hw-dict-btns" style="margin-top:12px;">
+        ${st.img ? `<button class="hw-dict-btn" id="hdViewImg" style="background:var(--accent-d);">📖 查看听写内容</button>` : ''}
+        <button class="hw-dict-btn" id="hdAgain">🔄 再听写一遍</button>
+        <button class="hw-dict-btn" id="hdClose" style="background:#9a8a96;">完成</button>
+      </div>
+    </div>`;
+    if(st.img){
+      const vb = document.getElementById('hdViewImg');
+      if(vb) vb.onclick = ()=>{
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:132;background:rgba(20,16,26,.82);display:flex;align-items:center;justify-content:center;padding:16px;';
+        ov.innerHTML = `<img src="${st.img}" alt="听写内容照片" style="max-width:100%;max-height:100%;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.5);">`;
+        ov.onclick = ()=> ov.remove();
+        document.body.appendChild(ov);
+      };
+    }
+    document.getElementById('hdAgain').onclick = ()=>{ mask.remove(); openDictation(iso, itemId); };
+    document.getElementById('hdClose').onclick = ()=>{ mask.remove(); hwDictState = null; render(); };
+  };
+  const submit = ()=>{
+    if(st.phase !== 'input') return;
+    const v = $('hdInput').value.trim();
+    if(!v){ $('hdFb').textContent = '先听，再把听到的写下来哦～'; $('hdFb').style.color = '#c46a6a'; return; }
+    const ok = hwNormAns(v) === hwNormAns(curWord());
+    st.answers[st.idx] = v;
+    $('hdFb').textContent = ok ? '✅ 对啦！点「下一个」继续～' : '❌ 这个词是「' + curWord() + '」，点「下一个」继续～';
+    $('hdFb').style.color = ok ? '#5aa06a' : '#c46a6a';
+    st.phase = 'waitnext';
+    $('hdInput').disabled = true;
+    $('hdOk').style.display='none'; $('hdSkip').style.display='none';
+    const nx = $('hdNext'); nx.style.display='';
+    nx.textContent = (st.idx + 1 >= st.words.length) ? '🏁 看成绩' : '➡️ 下一个';
+  };
+  const goNext = ()=>{
+    if(st.phase === 'waitnext'){ st.idx++; st.idx >= st.words.length ? finish() : ask(); }
+    else { st.answers[st.idx] = null; st.idx++; st.idx >= st.words.length ? finish() : ask(); }
+  };
+  $('hdPlay').onclick = play;
+  $('hdOk').onclick = submit;
+  $('hdNext').onclick = goNext;
+  $('hdSkip').onclick = goNext;
+  $('hdQuit').onclick = ()=>{ mask.remove(); hwDictState = null; };
+  $('hdInput').addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
+  ask();
 }
 
 /* 同步诊断与自救：渲染本机状态、提供强制拉取/重连/复制同家庭链接 */
@@ -13542,6 +14080,8 @@ function collectSyncState(){
     earnedBadges,
     /* 课程表（家长排课）：与其它家长配置一样按 ts 取较新收敛 */
     timetable, ttTs,
+    /* 校内作业（家长布置，按日期分桶）：与课程表一样按 hwTs 取较新收敛 */
+    hw, hwTs,
     /* 摇骰子区间设置：家长配置，按 diceCfgTs 取较新收敛（最后编辑者赢） */
     diceCfg, diceCfgTs,
     knowledgeType,
@@ -13726,6 +14266,16 @@ function applySyncState(obj){
         try { localStorage.setItem(TT_KEY, JSON.stringify(timetable)); }catch(e){}
         if(_tt > ttTs){ ttTs = _tt; try{ localStorage.setItem(TT_TS_KEY, String(ttTs)); }catch(e){} }
         if(page === 'timetable'){ try{ renderTimetable(); }catch(e){} }
+      }
+    }
+    /* 校内作业：按 hwTs 取较新收敛（最后编辑者赢），与 timetable 一致 */
+    if(obj.hw && typeof obj.hw === 'object'){
+      const _hwt = Number(obj.hwTs)||0;
+      if((_hwt===0 && hwTs===0) || _hwt > hwTs){
+        hw = obj.hw;
+        try { localStorage.setItem(HW_KEY, JSON.stringify(hw)); }catch(e){}
+        if(_hwt > hwTs){ hwTs = _hwt; try{ localStorage.setItem(HW_TS_KEY, String(hwTs)); }catch(e){} }
+        if(page === 'home' || page === 'school' || page === 'parent'){ try{ render(); }catch(e){} }
       }
     }
     /* 摇骰子区间设置：按 diceCfgTs 取较新收敛（最后编辑者赢），与 timetable/pin 一致 */
