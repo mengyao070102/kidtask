@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609179" />
+<meta name="build-version" content="202609180" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13392,7 +13392,7 @@ function renderHwEditor(){
         <button class="hw-dict-btn" data-act="attach" data-i="${i}" style="background:#8a7fa8;">📎 仅存图</button>
         ${ (it._img || it.img) ? `<img class="hw-thumb" src="${it._img || it.img}" alt="作业图片">` : '' }
         <span class="hw-photo-hint">AI 自动解析任务；也可直接粘贴截图</span>
-        <input type="file" data-f="photo" accept="image/*" capture="environment" style="display:none;">
+        <input type="file" data-f="photo" accept="image/*" style="display:none;">
       </div>
       <div class="hw-ed-btns">
         <button class="hw-dict-btn" data-act="del" data-i="${i}" style="background:#c46a6a;">🗑️ 删除</button>
@@ -13451,7 +13451,7 @@ function renderHwEditor(){
   const upBtn = document.getElementById('hwUploadAI');
   if(upBtn) upBtn.onclick = ()=>{
     const fi = document.createElement('input');
-    fi.type = 'file'; fi.accept = 'image/*'; fi.capture = 'environment'; fi.style.display = 'none';
+    fi.type = 'file'; fi.accept = 'image/*'; fi.style.display = 'none';
     fi.onchange = ()=>{
       if(fi.files && fi.files[0]){
         hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub:'其他', title:'', detail:'', dict:null });
@@ -13600,7 +13600,7 @@ function hwDictUploadPrompt(iso, itemId, errMsg){
   document.getElementById('hdUpCancel').onclick = ()=> mask.remove();
   document.getElementById('hdUpImg').onclick = ()=>{
     const fi = document.createElement('input');
-    fi.type = 'file'; fi.accept = 'image/*'; fi.capture = 'environment'; fi.style.display = 'none';
+    fi.type = 'file'; fi.accept = 'image/*'; fi.style.display = 'none';
     fi.onchange = ()=>{ if(fi.files && fi.files[0]) hwDictFromImg(iso, itemId, fi.files[0]); };
     document.body.appendChild(fi); fi.click();
     setTimeout(()=>{ try{ fi.remove(); }catch(e){} }, 60000);
