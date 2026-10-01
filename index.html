@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609181" />
+<meta name="build-version" content="202609182" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10197,19 +10197,34 @@ function hwVisionConfirm(items, i, origItem){
   };
 }
 
-/* 「📷 传词表」：家长端上传词表照片 → AI 识别生成听写词 → 自动填入词表输入框（照片随作业存档） */
-async function hwEditorDictPhoto(i, file, btn){
+/* 「📷 传词表」：家长端上传词表照片（可多张，如词表分页）→ AI 逐张识别 → 去重合并生成听写词 → 填入词表输入框（第一张照片随作业存档） */
+async function hwEditorDictPhoto(i, files, btn){
   const it = hwEdit && hwEdit.items[i];
-  if(!it || !file) return;
+  const arr = (files && files.length) ? Array.from(files).slice(0, 5) : (files ? [files] : []);   // FileList → 数组；单个 File 兼容
+  if(!it || !arr.length) return;
   const old = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = '🤖 识别中…'; }
+  const all = [];
   try {
-    const img = await hwCompressImage(file, 1100, 0.72);
-    try { it._imgSave = await hwCompressImage(file, 900, 0.55); } catch(e) { it._imgSave = img; }
-    const words = await hwExtractWordsFromImg(img);
-    if(!words) throw new Error('no words');
-    it.dict = { words };
-    try{ showToast('✅ 已识别 ' + words.length + ' 个词，保存后同步'); }catch(e){}
+    for(let k = 0; k < arr.length; k++){
+      if(btn) btn.textContent = '🤖 识别中 ' + (k+1) + '/' + arr.length + '…';
+      const img = await hwCompressImage(arr[k], 1100, 0.72);
+      if(k === 0){ try { it._imgSave = await hwCompressImage(arr[k], 900, 0.55); } catch(e) { it._imgSave = img; } }
+      const words = await hwExtractWordsFromImg(img);
+      if(words) all.push(...words);
+    }
+    if(!all.length) throw new Error('no words');
+    const uniq = [];
+    const seen = new Set();
+    for(const w of all){ const t = String(w).trim(); const key = t.toLowerCase(); if(t && !seen.has(key)){ seen.add(key); uniq.push(t); } }
+    if(!it.dict || !Array.isArray(it.dict.words) || !it.dict.words.length){
+      it.dict = { words: uniq.slice(0, 30) };   // 原本没词表 → 直接填
+    } else {
+      const seen2 = new Set(it.dict.words.map(x => String(x).toLowerCase()));
+      for(const w of uniq){ const key = String(w).toLowerCase(); if(!seen2.has(key)){ seen2.add(key); it.dict.words.push(w); } }
+      it.dict.words = it.dict.words.slice(0, 30);   // 已有词表 → 新词追加在后面（去重）
+    }
+    try{ showToast('✅ 已识别 ' + it.dict.words.length + ' 个词（' + arr.length + ' 张照片），保存后同步'); }catch(e){}
   } catch(e) {
     try{ showToast('⚠️ 词表没认出来，换张清楚一点的照片试试～'); }catch(e2){}
   }
@@ -13408,7 +13423,7 @@ function renderHwEditor(){
       <div class="hw-ed-row">
         <input type="text" data-f="dict" style="flex:1;min-width:160px;" placeholder="听写词表（逗号/空格分隔，可留空）" value="${esc((it.dict&&it.dict.words||[]).join('、'))}">
         <button class="hw-dict-btn" data-act="dictimg" data-i="${i}" style="background:#5a9a7a;">📷 传词表</button>
-        <input type="file" data-f="dictphoto" accept="image/*" style="display:none;">
+        <input type="file" data-f="dictphoto" accept="image/*" multiple style="display:none;">
       </div>
       <div class="hw-ed-row hw-photo-row">
         <button class="hw-dict-btn" data-act="vision" data-i="${i}" style="background:var(--accent-d);">📷 上传图片</button>
@@ -13450,14 +13465,14 @@ function renderHwEditor(){
     titleInp.addEventListener('change', () => { trySplit(titleInp.value); });
     card.querySelector('[data-f=dict]').oninput = e => {
       const words = e.target.value.split(/[、,，;；\s]+/).map(w=>w.trim()).filter(Boolean);
-      it.dict = words.length ? { words: words.slice(0,20) } : null;
+      it.dict = words.length ? { words: words.slice(0,30) } : null;
     };
   });
   box.querySelectorAll('[data-act=dictimg]').forEach(b => {
     b.onclick = ()=>{
       const i = Number(b.dataset.i);
       const inp = b.closest('.hw-ed').querySelector('[data-f=dictphoto]');
-      if(inp){ inp.onchange = ()=>{ if(inp.files && inp.files[0]) hwEditorDictPhoto(i, inp.files[0], b); inp.value = ''; }; inp.click(); }
+      if(inp){ inp.onchange = ()=>{ if(inp.files && inp.files.length) hwEditorDictPhoto(i, inp.files, b); inp.value = ''; }; inp.click(); }
     };
   });
   box.querySelectorAll('[data-act=del]').forEach(b => { b.onclick = ()=>{ hwEdit.items.splice(Number(b.dataset.i),1); renderHwEditor(); }; });
@@ -13519,7 +13534,7 @@ async function hwEditorSave(saveBtn){
     if(!it) return;
     it.title = card.querySelector('[data-f=title]').value;
     const dw = card.querySelector('[data-f=dict]').value.split(/[、,，;；\s]+/).map(w=>w.trim()).filter(Boolean);
-    it.dict = dw.length ? { words: dw.slice(0,20) } : it.dict;
+    it.dict = dw.length ? { words: dw.slice(0,30) } : it.dict;
     it.sub = card.querySelector('[data-f=sub]').value;
     if(it._imgSave) it.img = it._imgSave;   // 听写内容照片：随作业保存，孩子端可查看
   });
