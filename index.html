@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609180" />
+<meta name="build-version" content="202609181" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10197,6 +10197,25 @@ function hwVisionConfirm(items, i, origItem){
   };
 }
 
+/* 「📷 传词表」：家长端上传词表照片 → AI 识别生成听写词 → 自动填入词表输入框（照片随作业存档） */
+async function hwEditorDictPhoto(i, file, btn){
+  const it = hwEdit && hwEdit.items[i];
+  if(!it || !file) return;
+  const old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '🤖 识别中…'; }
+  try {
+    const img = await hwCompressImage(file, 1100, 0.72);
+    try { it._imgSave = await hwCompressImage(file, 900, 0.55); } catch(e) { it._imgSave = img; }
+    const words = await hwExtractWordsFromImg(img);
+    if(!words) throw new Error('no words');
+    it.dict = { words };
+    try{ showToast('✅ 已识别 ' + words.length + ' 个词，保存后同步'); }catch(e){}
+  } catch(e) {
+    try{ showToast('⚠️ 词表没认出来，换张清楚一点的照片试试～'); }catch(e2){}
+  }
+  if(btn){ btn.disabled = false; btn.textContent = old; }
+  renderHwEditor();   // 重渲染让词表填进输入框，可继续手动增删
+}
 /* 「📎 仅传图片」：不走 AI 识别，直接把照片挂到这条作业上（识别失败时的兜底入口） */
 async function hwEditorAttach(i, file, btn){
   const it = hwEdit && hwEdit.items[i];
@@ -13386,7 +13405,11 @@ function renderHwEditor(){
         <select data-f="sub">${HW_SUBJECTS.map(s=>`<option ${s===it.sub?'selected':''}>${s}</option>`).join('')}</select>
         <input type="text" data-f="title" placeholder="作业名称；粘贴「1.听写，2.阅读」可自动拆成多条" value="${esc(it.title||'')}">
       </div>
-      <div class="hw-ed-row"><input type="text" data-f="dict" style="flex:1;min-width:160px;" placeholder="听写词表（逗号/空格分隔；留空时孩子端可拍词表照片自动生成）" value="${esc((it.dict&&it.dict.words||[]).join('、'))}"></div>
+      <div class="hw-ed-row">
+        <input type="text" data-f="dict" style="flex:1;min-width:160px;" placeholder="听写词表（逗号/空格分隔，可留空）" value="${esc((it.dict&&it.dict.words||[]).join('、'))}">
+        <button class="hw-dict-btn" data-act="dictimg" data-i="${i}" style="background:#5a9a7a;">📷 传词表</button>
+        <input type="file" data-f="dictphoto" accept="image/*" style="display:none;">
+      </div>
       <div class="hw-ed-row hw-photo-row">
         <button class="hw-dict-btn" data-act="vision" data-i="${i}" style="background:var(--accent-d);">📷 上传图片</button>
         <button class="hw-dict-btn" data-act="attach" data-i="${i}" style="background:#8a7fa8;">📎 仅存图</button>
@@ -13427,7 +13450,14 @@ function renderHwEditor(){
     titleInp.addEventListener('change', () => { trySplit(titleInp.value); });
     card.querySelector('[data-f=dict]').oninput = e => {
       const words = e.target.value.split(/[、,，;；\s]+/).map(w=>w.trim()).filter(Boolean);
-      it.dict = words.length ? { words: words.slice(0,15) } : null;
+      it.dict = words.length ? { words: words.slice(0,20) } : null;
+    };
+  });
+  box.querySelectorAll('[data-act=dictimg]').forEach(b => {
+    b.onclick = ()=>{
+      const i = Number(b.dataset.i);
+      const inp = b.closest('.hw-ed').querySelector('[data-f=dictphoto]');
+      if(inp){ inp.onchange = ()=>{ if(inp.files && inp.files[0]) hwEditorDictPhoto(i, inp.files[0], b); inp.value = ''; }; inp.click(); }
     };
   });
   box.querySelectorAll('[data-act=del]').forEach(b => { b.onclick = ()=>{ hwEdit.items.splice(Number(b.dataset.i),1); renderHwEditor(); }; });
@@ -13489,7 +13519,7 @@ async function hwEditorSave(saveBtn){
     if(!it) return;
     it.title = card.querySelector('[data-f=title]').value;
     const dw = card.querySelector('[data-f=dict]').value.split(/[、,，;；\s]+/).map(w=>w.trim()).filter(Boolean);
-    it.dict = dw.length ? { words: dw.slice(0,15) } : it.dict;
+    it.dict = dw.length ? { words: dw.slice(0,20) } : it.dict;
     it.sub = card.querySelector('[data-f=sub]').value;
     if(it._imgSave) it.img = it._imgSave;   // 听写内容照片：随作业保存，孩子端可查看
   });
