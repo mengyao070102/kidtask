@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609188" />
+<meta name="build-version" content="202609189" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13292,6 +13292,28 @@ function saveHW(){
   try{ pushSync(); }catch(e){}
 }
 function hwItems(iso){ const d = hw[iso]; return (d && Array.isArray(d.items)) ? d.items : []; }
+/* 校内作业合并（按日期桶 + 删除墓碑）：
+   旧方案是整包 hwTs last-writer-wins——孩子端打勾/听写会频繁回写整包，若其旧包在家长删除后才到达（离线/推送在途），
+   会以更新的 hwTs 覆盖删除 → 已删条目复活。
+   新方案：逐日期桶合并。桶 ts 新者的同 id 条目为准 + 双方条目按 id 并集 + 双方墓碑(dl)并集过滤 → 删除永久生效。 */
+function mergeHwMaps(localHw, remoteHw){
+  const out = {};
+  const dates = new Set([].concat(Object.keys(localHw || {}), Object.keys(remoteHw || {})));
+  dates.forEach(d => {
+    const L = localHw && localHw[d], R = remoteHw && remoteHw[d];
+    if(!L){ out[d] = R; return; }
+    if(!R){ out[d] = L; return; }
+    const dl = Array.from(new Set([].concat(L.dl || [], R.dl || []).filter(Boolean))).slice(0, 60);
+    const newer = (Number(R.ts) || 0) > (Number(L.ts) || 0) ? R : L;
+    const older = newer === R ? L : R;
+    const map = {};
+    (older.items || []).forEach(it => { if(it && it.id) map[it.id] = it; });
+    (newer.items || []).forEach(it => { if(it && it.id) map[it.id] = it; });   // newer 同 id 覆盖 older（如完成状态）
+    const items = Object.keys(map).map(k => map[k]).filter(it => it && (it.title || '').trim() && dl.indexOf(it.id) < 0);
+    out[d] = { items, ts: Math.max(Number(L.ts) || 0, Number(R.ts) || 0), dl };
+  });
+  return out;
+}
 function hwResult(iso, itemId){
   try{ const o = JSON.parse(localStorage.getItem(HW_RESULT_KEY)); return o && o[iso] && o[iso][itemId]; }catch(e){ return undefined; }
 }
@@ -13423,10 +13445,10 @@ ${hwIsDictation(it) ? '这份作业和听写有关，请同时出词表。' : ''
   }
 }
 /* 家长编辑器状态（家长审核页内） */
-let hwEdit = null;   // { date:'YYYY-MM-DD', items:[...] }
+let hwEdit = null;   // { date:'YYYY-MM-DD', items:[...], oldIds:[...] }
 function hwEditLoad(dateISO){
   const items = hwItems(dateISO).map(it => JSON.parse(JSON.stringify(it)));
-  hwEdit = { date: dateISO, items };
+  hwEdit = { date: dateISO, items, oldIds: items.map(x => x.id).filter(Boolean) };   // oldIds：本次编辑会话开始时已保存的条目 id（保存时对比得出「被删除的条目」→ 写入墓碑）
 }
 function hwEditDirtyDate(){
   const inp = document.getElementById('hwDate');
@@ -13564,7 +13586,11 @@ async function hwEditorSave(saveBtn){
     else if(it._imgSave) it.img = it._imgSave;   // 听写内容照片：随作业保存，孩子端可查看
   });
   hwEdit.items = hwEdit.items.filter(it => (it.title||'').trim());
-  hw[hwEdit.date] = { items: hwEdit.items.map(it => { const c = Object.assign({}, it, { id: it.id || ('hw' + Date.now() + Math.floor(Math.random()*100)) }); delete c._img; delete c._imgSave; delete c._imgSaveArr; return c; }), ts: Date.now() };
+  // 删除墓碑：本次编辑会话中「原来有、现在没有」的条目 id 记入桶的 dl，防止其他端旧整包回写时复活（同步按墓碑过滤）
+  const prevBucket = hw[hwEdit.date] || {};
+  const dels = Array.from(new Set([].concat(prevBucket.dl || [], hwEdit.oldIds || [])
+    .filter(id => id && !hwEdit.items.some(x => x.id === id)))).slice(0, 60);
+  hw[hwEdit.date] = { items: hwEdit.items.map(it => { const c = Object.assign({}, it, { id: it.id || ('hw' + Date.now() + Math.floor(Math.random()*100)) }); delete c._img; delete c._imgSave; delete c._imgSaveArr; return c; }), ts: Date.now(), dl: dels };
   saveHW();
   hwEditLoad(hwEdit.date);
   renderHwEditor();
@@ -14633,14 +14659,18 @@ function applySyncState(obj){
         if(page === 'timetable'){ try{ renderTimetable(); }catch(e){} }
       }
     }
-    /* 校内作业：按 hwTs 取较新收敛（最后编辑者赢），与 timetable 一致 */
+    /* 校内作业：按日期桶合并（+删除墓碑过滤）。不再整包 hwTs 裁决——孩子端频繁回写整包会把家长的删除覆盖回去（条目复活） */
     if(obj.hw && typeof obj.hw === 'object'){
-      const _hwt = Number(obj.hwTs)||0;
-      if((_hwt===0 && hwTs===0) || _hwt > hwTs){
-        hw = obj.hw;
+      const merged = mergeHwMaps(hw, obj.hw);
+      if(JSON.stringify(merged) !== JSON.stringify(hw)){
+        hw = merged;
         try { localStorage.setItem(HW_KEY, JSON.stringify(hw)); }catch(e){}
+        const _hwt = Number(obj.hwTs) || 0;
         if(_hwt > hwTs){ hwTs = _hwt; try{ localStorage.setItem(HW_TS_KEY, String(hwTs)); }catch(e){} }
         if(page === 'home' || page === 'school' || page === 'parent'){ try{ render(); }catch(e){} }
+      } else {
+        const _hwt = Number(obj.hwTs) || 0;
+        if(_hwt > hwTs){ hwTs = _hwt; try{ localStorage.setItem(HW_TS_KEY, String(hwTs)); }catch(e){} }
       }
     }
     /* 摇骰子区间设置：按 diceCfgTs 取较新收敛（最后编辑者赢），与 timetable/pin 一致 */
