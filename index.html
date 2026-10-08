@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609185" />
+<meta name="build-version" content="202609186" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1505,7 +1505,11 @@
   .badge-group-t { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:#7a3a5a; margin-bottom:2px; }
   .badge-group-n { font-size:12px; font-weight:700; color:#9a8a96; background:var(--accent-soft); border-radius:999px; padding:1px 8px; }
   /* ===== 校内作业 ===== */
-  .hw-item { background:var(--card); border-radius:14px; padding:10px 12px; box-shadow:var(--shadow); margin-bottom:8px; }
+  .hw-item { background:var(--card); border-radius:14px; padding:10px 12px; box-shadow:var(--shadow); margin-bottom:8px; cursor:pointer; }
+  .hw-item .hw-title { word-break:break-all; }
+  .hw-item.done { opacity:.72; }
+  .hw-item.done .hw-title { text-decoration:line-through; color:var(--nav-ink-soft); }
+  .hw-check { flex:none; font-size:16px; }
   .hw-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .hw-sub { font-size:11px; font-weight:800; color:var(--title); background:var(--accent-soft); border-radius:999px; padding:2px 8px; white-space:nowrap; }
   .hw-seq { flex:none; min-width:20px; height:20px; border-radius:50%; background:var(--accent-d); color:#fff; font-size:12px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; padding:0 4px; box-sizing:border-box; }
@@ -13302,8 +13306,8 @@ function hwItemCard(iso, it, seq){
   const res = hwResult(iso, it.id);
   const isDict = it.dict && Array.isArray(it.dict.words) && it.dict.words.length > 0;
   const canDict = isDict || (!!it.img && hwIsDictation(it));   // 听写类作业：有词表或有词表图片都可开始
-  return `<div class="hw-item" data-hwid="${esc(it.id)}">
-    <div class="hw-top">${seq ? `<span class="hw-seq">${seq}</span>` : ''}<span class="hw-sub">${hwSubEmoji(it.sub)} ${esc(it.sub||'其他')}</span><span class="hw-title">${esc(it.title||'')}</span></div>
+  return `<div class="hw-item ${it.done ? 'done' : ''}" data-hwdone="${esc(it.id)}" data-hwdate="${esc(iso)}">
+    <div class="hw-top"><span class="hw-check">${it.done ? '✅' : '⭕'}</span>${seq ? `<span class="hw-seq">${seq}</span>` : ''}<span class="hw-sub">${hwSubEmoji(it.sub)} ${esc(it.sub||'其他')}</span><span class="hw-title">${esc(it.title||'')}</span></div>
     <div class="hw-actions">
       ${canDict ? `<button class="hw-dict-btn" data-hwdict="${esc(it.id)}" data-hwdate="${esc(iso)}">🎧 开始听写</button>` : ''}
       ${isDict ? `<span class="hw-dict-res">共 ${it.dict.words.length} 词</span>` : ''}
@@ -13389,7 +13393,7 @@ function bindHwDictBtns(root){
       };
     }
   });
-  root.querySelectorAll('.hw-row[data-hwdone]').forEach(r=>{
+  root.querySelectorAll('.hw-row[data-hwdone], .hw-item[data-hwdone]').forEach(r=>{
     r.onclick = ()=> hwToggleDone(r.dataset.hwdate, r.dataset.hwdone);
   });
 }
