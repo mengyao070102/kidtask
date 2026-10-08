@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609189" />
+<meta name="build-version" content="202609190" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13949,6 +13949,7 @@ function renderDiag(){
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">家庭码</span><span>'+esc(familyCode||'未知')+'</span></div>'
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">设备ID</span><span style="font-size:11px;word-break:break-all;text-align:right;max-width:62%;">'+esc(senderId||'未知')+'</span></div>'
     + '<div id="peerList" style="border-top:1px dashed #dfe6f0;margin-top:6px;padding-top:6px;">'+peersHtml()+'</div>';
+  bindPeerPager(document.getElementById('peerList'));
   try {
     const now = Date.now();
     if(!window.__diagVerT || now - window.__diagVerT > 60000){
@@ -13968,9 +13969,13 @@ function recordPeerSeen(id){
   const p=loadSyncPeers();
   if(p[id] && Date.now()-(Number(p[id])||0) < 30000) return;   /* 30 秒内重复收到不刷新存储，只刷显示 */
   p[id]=Date.now();
-  try{ localStorage.setItem(PEERS_KEY, JSON.stringify(p)); }catch(e){}
+  try{   /* 顺带清理 7 天未活跃的旧记录（多为旧行为"每次刷新算一台设备"留下的幻影） */
+    const now=Date.now();
+    for(const k of Object.keys(p)){ if(now-(Number(p[k])||0) > 7*86400000) delete p[k]; }
+    localStorage.setItem(PEERS_KEY, JSON.stringify(p));
+  }catch(e){}
   const el=document.getElementById('peerList');
-  if(el) el.innerHTML=peersHtml();
+  if(el){ el.innerHTML=peersHtml(); bindPeerPager(el); }
 }
 function relTime(ts){
   const s=Math.max(0, Date.now()-(Number(ts)||0));
@@ -13979,18 +13984,39 @@ function relTime(ts){
   if(s<86400000) return Math.floor(s/3600000)+' 小时前';
   return Math.floor(s/86400000)+' 天前';
 }
+/* 设备列表分页：每页 4 台，太多时显示 ‹ 1/2 › 翻页 */
+let peerPage = 0;
+const PEER_PAGE_SIZE = 4;
 function peersHtml(){
   const peers=loadSyncPeers();
-  const ids=Object.keys(peers).sort((a,b)=>(Number(peers[b])||0)-(Number(peers[a])||0));
+  const now=Date.now();
+  const ids=Object.keys(peers).filter(id => now-(Number(peers[id])||0) < 7*86400000).sort((a,b)=>(Number(peers[b])||0)-(Number(peers[a])||0));   /* 只显示 7 天内活跃过的（旧幻影不展示） */
+  const totalPages=Math.max(1, Math.ceil(ids.length / PEER_PAGE_SIZE));
+  if(peerPage >= totalPages) peerPage = totalPages - 1;
+  if(peerPage < 0) peerPage = 0;
   const rows=['<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 本机</span><span style="color:'+(syncConnected?'#1a9e57':'#e5484d')+';font-weight:700;">'+(syncConnected?'在线':'离线')+'</span></div>'];
   if(!ids.length){
     rows.push('<div style="padding:4px 0;color:#9aa3b2;font-size:12px;line-height:1.6;">还没有收到其他设备的消息——其他设备打开 App 并连上同步后，会出现在这里。</div>');
   } else {
-    ids.forEach(id=>{
+    const start = peerPage * PEER_PAGE_SIZE;
+    ids.slice(start, start + PEER_PAGE_SIZE).forEach(id=>{
       rows.push('<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 设备 '+esc(String(id).slice(0,6))+'</span><span>最后活跃 '+relTime(peers[id])+'</span></div>');
     });
+    if(totalPages > 1){
+      rows.push('<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 0 2px;">'
+        + '<button type="button" class="peer-pg" data-pg="prev" style="width:24px;height:24px;border-radius:50%;border:1px solid #dfe6f0;background:#fff;color:#666;font-size:14px;line-height:1;cursor:pointer;'+(peerPage<=0?'opacity:.35;pointer-events:none;':'')+'">‹</button>'
+        + '<span style="font-size:11px;color:#888;">'+(peerPage+1)+' / '+totalPages+' 页 · 共 '+ids.length+' 台设备</span>'
+        + '<button type="button" class="peer-pg" data-pg="next" style="width:24px;height:24px;border-radius:50%;border:1px solid #dfe6f0;background:#fff;color:#666;font-size:14px;line-height:1;cursor:pointer;'+(peerPage>=totalPages-1?'opacity:.35;pointer-events:none;':'')+'">›</button>'
+        + '</div>');
+    }
   }
   return rows.join('');
+}
+function bindPeerPager(el){
+  if(!el) return;
+  el.querySelectorAll('.peer-pg').forEach(b=>{
+    b.onclick = ()=>{ peerPage += (b.dataset.pg === 'next' ? 1 : -1); el.innerHTML = peersHtml(); bindPeerPager(el); };
+  });
 }
 /* 折叠面板展开 / 收起（状态记忆在 openPanels，跨重渲染保持） */
 function togglePanel(pid, head){
@@ -14266,11 +14292,22 @@ let lastRemoteTs = 0;            // 已应用的最大远端 ts（去重过期�
 let logicalTs = 0;              // 本地单调逻辑时钟，避免跨设备真实时钟不一致导致误判过期
 try { logicalTs = Number(localStorage.getItem('kidtask_sync_ts')) || 0; } catch(e){}
 function bumpSyncTs(){ logicalTs = Math.max(logicalTs + 1, Date.now()); try { localStorage.setItem('kidtask_sync_ts', String(logicalTs)); } catch(e){} return logicalTs; }
-const senderId = Math.random().toString(36).slice(2, 10);
+/* 设备ID：首次生成后写入 localStorage 永久固定——同一设备不再每次刷新变"新设备"
+   （旧行为随机生成 → 诊断面板幻影设备堆积 + broker 残留大量历史 retain 快照拖垮同步） */
+const senderId = (function(){
+  try {
+    let id = localStorage.getItem('kidtask_sender_id_v1');
+    if(!id || !/^[a-z0-9]{6,12}$/.test(id)){
+      id = Math.random().toString(36).slice(2, 10);
+      localStorage.setItem('kidtask_sender_id_v1', id);
+    }
+    return id;
+  } catch(e){ return Math.random().toString(36).slice(2, 10); }
+})();
 let familyCode = '';
 let pushTimer = null;
 let pulseTimer = null;
-function syncBase(){ return 'kidtask/' + familyCode + '/sync'; }   // 同步基础路径
+function syncBase(){ return 'kidtask/' + familyCode + '/sync2'; }   // v2：旧 sync 前缀下堆积了大量历史 retain 快照（旧行为每次刷新一个随机设备ID×含作业照片的大包），每次连接 sync/# 全量重放导致同步变慢/失败；换新前缀直接抛弃旧垃圾（其他端 90 秒内自动更新到新版，短暂窗口不同步可接受）
 function syncMyTopic(){ return syncBase() + '/' + senderId; }       // 每设备独立 retain 主题：晚加入者订阅 sync/# 可拉取全部设备快照=真并集（根治单主题 retain 被最后发布者覆盖）
 function syncCtrlTopic(){ return syncBase(); }                     // 控制/广播主题（request 等）
 function syncTopic(){ return syncMyTopic(); }                       // 兼容旧引用（pushSync 发布用）
