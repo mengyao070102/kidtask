@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609187" />
+<meta name="build-version" content="202609188" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1550,9 +1550,9 @@
   .hw-dict-score { font-size:26px; font-weight:900; color:var(--title); }
   .hw-dict-wrong { font-size:13px; color:var(--ink); line-height:1.7; margin-top:8px; }
   /* 词表确认弹窗：词语胶囊（点词语改、点 ✕ 删） */
-  .hw-wchip { display:inline-flex; align-items:center; gap:5px; background:var(--accent-soft); color:var(--title); border-radius:999px; padding:6px 8px 6px 12px; font-size:14px; font-weight:700; cursor:pointer; user-select:none; }
+  .hw-wchip { display:inline-flex; align-items:center; gap:7px; background:var(--accent-soft); color:var(--title); border-radius:999px; padding:8px 10px 8px 16px; font-size:16px; font-weight:700; cursor:pointer; user-select:none; }
   .hw-wchip .hw-wtxt { font-weight:700; }
-  .hw-wchip .hw-wdel { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:rgba(0,0,0,.12); font-size:10px; color:#fff; cursor:pointer; }
+  .hw-wchip .hw-wdel { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:rgba(0,0,0,.12); font-size:11px; color:#fff; cursor:pointer; }
   /* ===== 课程表 ===== */
   .tt-today { background:linear-gradient(135deg,var(--accent-soft),#fff); border:2px solid var(--accent-soft); border-radius:14px; padding:10px 14px; font-size:14px; font-weight:700; color:#7a3a5a; margin:10px 0 12px; line-height:1.6; }
   .tt-today .tt-none { color:#9a8a96; font-weight:600; }
@@ -13741,13 +13741,13 @@ function hwWordsEditPopup(words, onConfirm, onRetake, subtitle, goText){
   let list = (words && words.length) ? words.map(x => String(x).trim()).filter(Boolean) : [];
   const mask = document.createElement('div');
   mask.className = 'hw-dict-mask'; mask.id = 'hwDictMask';
-  mask.innerHTML = `<div class="hw-dict-pop" style="max-width:340px;">
-    <div style="font-size:30px;">📋</div>
-    <div style="font-weight:700;margin:4px 0 2px;">识别到 <span id="hdWc">${list.length}</span> 个词</div>
-    <div style="font-size:12px;color:var(--nav-ink-soft,#888);">${esc(subtitle || '点词语可修改，点 ✕ 删除，下面还能添加新词')}</div>
-    <div id="hdChips" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:12px 0 4px;max-height:200px;overflow-y:auto;"></div>
-    <div style="display:flex;gap:6px;justify-content:center;margin:10px 0 2px;">
-      <input id="hdAddInp" autocomplete="off" placeholder="输入词语添加" style="width:150px;padding:8px 10px;border-radius:10px;border:2px solid var(--accent-soft,#e7dff0);font-size:14px;">
+  mask.innerHTML = `<div class="hw-dict-pop" style="max-width:480px;">
+    <div style="font-size:34px;">📋</div>
+    <div style="font-weight:700;margin:4px 0 2px;font-size:17px;">识别到 <span id="hdWc">${list.length}</span> 个词</div>
+    <div style="font-size:13px;color:var(--nav-ink-soft,#888);">${esc(subtitle || '点词语可修改，点 ✕ 删除，下面还能添加新词')}</div>
+    <div id="hdChips" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-start;align-content:flex-start;margin:14px 0 4px;max-height:45vh;overflow-y:auto;padding:4px 6px;background:rgba(127,127,127,.06);border-radius:12px;"></div>
+    <div style="display:flex;gap:8px;justify-content:center;margin:12px 0 2px;">
+      <input id="hdAddInp" autocomplete="off" placeholder="输入词语添加" style="flex:1;max-width:240px;padding:10px 12px;border-radius:10px;border:2px solid var(--accent-soft,#e7dff0);font-size:16px;">
       <button class="hw-dict-btn" id="hdAddBtn" style="background:var(--accent-d);">➕ 添加</button>
     </div>
     <div class="hw-dict-btns" style="margin-top:12px;">
@@ -13772,7 +13772,7 @@ function hwWordsEditPopup(words, onConfirm, onRetake, subtitle, goText){
         const i = Number(c.dataset.i);
         const inp = document.createElement('input');
         inp.value = list[i];
-        inp.style.cssText = 'width:110px;padding:6px 8px;border-radius:10px;border:2px solid var(--accent-d,#7a5fb0);font-size:14px;font-weight:600;';
+        inp.style.cssText = 'flex:1;min-width:130px;padding:8px 10px;border-radius:999px;border:2px solid var(--accent-d,#7a5fb0);font-size:16px;font-weight:600;';
         c.replaceWith(inp);
         inp.focus(); inp.select();
         const commit = ()=>{ const v = inp.value.trim(); if(v) list[i] = v; else list.splice(i, 1); paint(); };
