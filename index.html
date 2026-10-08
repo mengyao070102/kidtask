@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609183" />
+<meta name="build-version" content="202609184" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -11224,11 +11224,12 @@ function renderPublishCal(type, isSchool, today, dated){
   const first = new Date(calYear, calMonth, 1);
   const startDow = first.getDay();                 // 0=周日
   const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
-  // 统计每天任务总数
+  // 统计每天任务总数（校内类型：把校内作业条数也算进格子角标）
   const counts = {};
   for(let dd=1; dd<=daysInMonth; dd++){
     const d = new Date(calYear, calMonth, dd);
-    const n = dated.filter(t=>taskMatchesDate(t, d)).length;
+    let n = dated.filter(t=>taskMatchesDate(t, d)).length;
+    if(isSchool){ try { n += hwItems(fmtISO(d)).length; } catch(e){} }
     if(n>0) counts[fmtISO(d)] = n;
   }
   const em = buildEarnedMap(type);  // 积分表（去 N²）
@@ -11280,8 +11281,11 @@ function renderPublishCal(type, isSchool, today, dated){
   });
   if(calSelISO){
     const cl = document.getElementById('calList');
-    if(!selTasks.length){ cl.innerHTML = `<div class="day-empty">这一天没有任务～</div>`; }
+    let hwN = 0;
+    if(isSchool){ try { hwN = hwItems(calSelISO).length; } catch(e){} }
+    if(!selTasks.length && !hwN){ cl.innerHTML = `<div class="day-empty">这一天没有任务～</div>`; }
     else selTasks.forEach(t=> cl.appendChild(taskBlock(t, new Date(calSelISO.replace(/-/g,'/')+' 12:00:00'), true, true)));
+    if(isSchool){ try { appendHwSchoolDay(calSelISO); } catch(e){ console.error('[hw] 月历校内作业渲染异常', e); } }   // 📚 月历视图选中日期也显示校内作业
   }
 }
 
@@ -13365,7 +13369,7 @@ function appendHwSchoolDay(selISO){
   const box = document.createElement('div');
   box.innerHTML = `<div class="section-h" style="margin:18px 0 8px;">📚 校内作业（${selISO===fmtISO(new Date())?'今天':selISO}${items.length?` · ${items.length} 项`:''}）</div>` +
     (items.length ? items.map(it => hwItemCard(selISO, it)).join('') : '<div class="day-empty">这一天暂无校内作业记录～</div>');
-  const sl = document.getElementById('selList');
+  const sl = document.getElementById('selList') || document.getElementById('calList');   // 周视图 selList / 月历视图 calList 兼容
   if(sl && sl.parentNode) sl.parentNode.insertBefore(box, sl.nextSibling);
   bindHwDictBtns(box);
 }
