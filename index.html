@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609184" />
+<meta name="build-version" content="202609185" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1545,6 +1545,10 @@
   .hw-dict-btns { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
   .hw-dict-score { font-size:26px; font-weight:900; color:var(--title); }
   .hw-dict-wrong { font-size:13px; color:var(--ink); line-height:1.7; margin-top:8px; }
+  /* 词表确认弹窗：词语胶囊（点词语改、点 ✕ 删） */
+  .hw-wchip { display:inline-flex; align-items:center; gap:5px; background:var(--accent-soft); color:var(--title); border-radius:999px; padding:6px 8px 6px 12px; font-size:14px; font-weight:700; cursor:pointer; user-select:none; }
+  .hw-wchip .hw-wtxt { font-weight:700; }
+  .hw-wchip .hw-wdel { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:rgba(0,0,0,.12); font-size:10px; color:#fff; cursor:pointer; }
   /* ===== 课程表 ===== */
   .tt-today { background:linear-gradient(135deg,var(--accent-soft),#fff); border:2px solid var(--accent-soft); border-radius:14px; padding:10px 14px; font-size:14px; font-weight:700; color:#7a3a5a; margin:10px 0 12px; line-height:1.6; }
   .tt-today .tt-none { color:#9a8a96; font-weight:600; }
@@ -13618,15 +13622,26 @@ function hwSpeak(text, en){
 function hwSpeakTwice(text, en){
   try {
     if(!window.speechSynthesis){ hwSpeak(text, en); return; }
-    window.speechSynthesis.cancel();
+    const syn = window.speechSynthesis;
+    syn.cancel();
+    if(hwSpeakTwice._t2){ clearTimeout(hwSpeakTwice._t2); hwSpeakTwice._t2 = null; }
+    if(hwSpeakTwice._fb){ clearTimeout(hwSpeakTwice._fb); hwSpeakTwice._fb = null; }
     const mk = rate => {
       const u = new SpeechSynthesisUtterance(String(text));
       u.lang = en ? 'en-US' : 'zh-CN';
       u.rate = (en ? 0.75 : 0.85) * rate;
       return u;
     };
-    window.speechSynthesis.speak(mk(1));
-    window.speechSynthesis.speak(mk(0.92));
+    let firstDone = false;
+    const playSecond = () => {
+      if(firstDone) return; firstDone = true;
+      if(hwSpeakTwice._fb){ clearTimeout(hwSpeakTwice._fb); hwSpeakTwice._fb = null; }
+      hwSpeakTwice._t2 = setTimeout(()=>{ try{ syn.speak(mk(0.92)); }catch(e){} }, 1500);   // 两遍之间停 1.5 秒，给孩子动笔时间
+    };
+    const u1 = mk(1);
+    u1.onend = playSecond;
+    hwSpeakTwice._fb = setTimeout(playSecond, 1200 + String(text).length * 700 + 1600);   // 兜底：个别浏览器 onend 不触发
+    syn.speak(u1);
   } catch(e){}
 }
 /* 听写词表图片 → AI 识别出词表（孩子端自动生成听写词）。要求逐行逐栏全部识别，不设个数截断 */
@@ -13672,7 +13687,7 @@ function hwDictUploadPrompt(iso, itemId, errMsg){
     setTimeout(()=>{ try{ fi.remove(); }catch(e){} }, 60000);
   };
 }
-/* 词表图片（可多张）→ AI 逐张识别 → 去重合并 → 存进这条作业（同步全家）→ 直接开始听写 */
+/* 词表图片（可多张）→ AI 逐张识别 → 去重合并 → 弹「词表确认」弹窗（可删/改/加）→ 确认后开始听写 */
 async function hwDictFromImg(iso, itemId, inputs){
   const oldM = document.getElementById('hwDictMask');
   if(oldM) oldM.remove();
@@ -13701,16 +13716,85 @@ async function hwDictFromImg(iso, itemId, inputs){
     if(!all.length) throw new Error('no words');
     const uniq = []; const seen = new Set();
     for(const w of all){ const t = String(w).trim(); const key = t.toLowerCase(); if(t && !seen.has(key)){ seen.add(key); uniq.push(t); } }
-    it.dict = { words: uniq.slice(0, 40) };
     if(saves.length){ it.imgs = saves; it.img = saves[0]; }
-    saveHW();   // 生成的词表随作业同步，家长端也能看到「共 N 词」
+    saveHW();
     mask.remove();
-    try{ showToast('✅ 已生成 ' + it.dict.words.length + ' 个听写词，开始听写！'); }catch(e){}
-    hwDictStart(iso, itemId, it.dict.words.slice(), it.imgs && it.imgs.length ? it.imgs : (it.img ? [it.img] : null));
+    try{ showToast('✅ 已识别 ' + Math.min(uniq.length, 40) + ' 个词，检查一下再开始～'); }catch(e){}
+    hwDictEditWords(iso, itemId, uniq.slice(0, 40));   // 识别结果先进确认弹窗，可增删改
   } catch(e) {
     mask.remove();
     hwDictUploadPrompt(iso, itemId, 'AI 没认出词表，换一张清楚一点的照片试试～');
   }
+}
+/* 词表确认弹窗：显示识别出的词语（点 ✕ 删除、点词语修改、输入框添加），确认后开始听写 */
+function hwDictEditWords(iso, itemId, words){
+  const it = hwItems(iso).find(x => x.id === itemId);
+  if(!it) return;
+  const oldM = document.getElementById('hwDictMask');
+  if(oldM) oldM.remove();
+  let list = (words && words.length) ? words.map(x => String(x).trim()).filter(Boolean) : [];
+  const mask = document.createElement('div');
+  mask.className = 'hw-dict-mask'; mask.id = 'hwDictMask';
+  mask.innerHTML = `<div class="hw-dict-pop" style="max-width:340px;">
+    <div style="font-size:30px;">📋</div>
+    <div style="font-weight:700;margin:4px 0 2px;">识别到 <span id="hdWc">${list.length}</span> 个词</div>
+    <div style="font-size:12px;color:var(--nav-ink-soft,#888);">点词语可修改，点 ✕ 删除，下面还能添加新词</div>
+    <div id="hdChips" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:12px 0 4px;max-height:200px;overflow-y:auto;"></div>
+    <div style="display:flex;gap:6px;justify-content:center;margin:10px 0 2px;">
+      <input id="hdAddInp" autocomplete="off" placeholder="输入词语添加" style="width:150px;padding:8px 10px;border-radius:10px;border:2px solid var(--accent-soft,#e7dff0);font-size:14px;">
+      <button class="hw-dict-btn" id="hdAddBtn" style="background:var(--accent-d);">➕ 添加</button>
+    </div>
+    <div class="hw-dict-btns" style="margin-top:12px;">
+      <button class="hw-dict-btn" id="hdWRe" style="background:#8a7fa8;">📷 重新拍照</button>
+      <button class="hw-dict-btn" id="hdWGo" style="background:#5aa06a;">▶️ 开始听写</button>
+      <button class="hw-dict-btn" id="hdWCancel" style="background:#9a8a96;">取消</button>
+    </div>
+  </div>`;
+  document.body.appendChild(mask);
+  const chips = document.getElementById('hdChips');
+  const paint = ()=>{
+    const wc = document.getElementById('hdWc');
+    if(wc) wc.textContent = list.length;
+    if(!list.length){ chips.innerHTML = '<div style="font-size:12px;color:#c46a6a;">词表空啦，添加几个词或重新拍照吧～</div>'; return; }
+    chips.innerHTML = list.map((wd, i) => `<span class="hw-wchip" data-i="${i}"><b class="hw-wtxt">${esc(wd)}</b><span class="hw-wdel" data-del="${i}">✕</span></span>`).join('');
+    chips.querySelectorAll('.hw-wdel').forEach(d => {
+      d.onclick = (ev)=>{ ev.stopPropagation(); list.splice(Number(d.dataset.del), 1); paint(); };
+    });
+    chips.querySelectorAll('.hw-wchip').forEach(c => {
+      c.onclick = (ev)=>{
+        if(ev.target && ev.target.classList && ev.target.classList.contains('hw-wdel')) return;
+        const i = Number(c.dataset.i);
+        const inp = document.createElement('input');
+        inp.value = list[i];
+        inp.style.cssText = 'width:110px;padding:6px 8px;border-radius:10px;border:2px solid var(--accent-d,#7a5fb0);font-size:14px;font-weight:600;';
+        c.replaceWith(inp);
+        inp.focus(); inp.select();
+        const commit = ()=>{ const v = inp.value.trim(); if(v) list[i] = v; else list.splice(i, 1); paint(); };
+        inp.addEventListener('keydown', e => { if(e.key === 'Enter') commit(); });
+        inp.addEventListener('blur', commit);
+      };
+    });
+  };
+  paint();
+  const addWord = ()=>{
+    const inp = document.getElementById('hdAddInp');
+    const v = inp.value.trim();
+    if(!v) return;
+    if(list.length >= 60){ try{ showToast('词太多啦，最多 60 个～'); }catch(e){} return; }
+    list.push(v); inp.value = ''; inp.focus(); paint();
+  };
+  document.getElementById('hdAddBtn').onclick = addWord;
+  document.getElementById('hdAddInp').addEventListener('keydown', e => { if(e.key === 'Enter') addWord(); });
+  document.getElementById('hdWRe').onclick = ()=>{ mask.remove(); hwDictUploadPrompt(iso, itemId); };
+  document.getElementById('hdWCancel').onclick = ()=>{ mask.remove(); };
+  document.getElementById('hdWGo').onclick = ()=>{
+    if(!list.length){ try{ showToast('词表是空的，先添加几个词哦～'); }catch(e){} return; }
+    it.dict = { words: list.slice(0, 60) };
+    saveHW();   // 确认后的词表存进作业，同步全家
+    mask.remove();
+    try{ showToast('✅ 词表已保存（' + it.dict.words.length + ' 个词），开始听写！'); }catch(e){}
+    hwDictStart(iso, itemId, it.dict.words.slice(), it.imgs && it.imgs.length ? it.imgs : (it.img ? [it.img] : null));
+  };
 }
 /* 听写入口路由：有词表直接开始；有词表图片 → AI 自动生成；两者都没有 → 弹上传入口 */
 function openDictation(iso, itemId){
@@ -13722,22 +13806,20 @@ function openDictation(iso, itemId){
   if(imgs){ hwDictFromImg(iso, itemId, imgs); return; }
   hwDictUploadPrompt(iso, itemId);
 }
+/* 听写弹窗（纸笔模式）：无输入框，只负责读词（每词两遍）+ 翻页，孩子在纸上写；最后出全部词表供核对 */
 function hwDictStart(iso, itemId, words, imgs){
   const it = hwItems(iso).find(x => x.id === itemId);
   const imgArr = Array.isArray(imgs) ? imgs.filter(Boolean) : (imgs ? [imgs] : []);
-  hwDictState = { iso, itemId, title: it ? it.title : '', words, idx: 0, answers: [], phase: 'input', imgs: imgArr.length ? imgArr : null, img: imgArr.length ? imgArr[0] : null };
+  hwDictState = { iso, itemId, title: it ? it.title : '', words, idx: 0, phase: 'play', imgs: imgArr.length ? imgArr : null, img: imgArr.length ? imgArr[0] : null };
   const mask = document.createElement('div');
   mask.className = 'hw-dict-mask'; mask.id = 'hwDictMask';
   mask.innerHTML = `<div class="hw-dict-pop">
     <div class="hw-dict-prog" id="hdProg"></div>
     <div class="hw-dict-word" id="hdWord">🎧</div>
-    <input class="hw-dict-input" id="hdInput" autocomplete="off" placeholder="听写在这里输入">
-    <div class="hw-dict-fb" id="hdFb"></div>
+    <div class="hw-dict-fb" id="hdFb" style="font-size:12px;color:var(--nav-ink-soft,#888);">✍️ 听仔细，写在纸上哦～</div>
     <div class="hw-dict-btns">
       <button class="hw-dict-btn" id="hdPlay">🔊 再听一遍</button>
-      <button class="hw-dict-btn" id="hdSkip">跳过 ⏭️</button>
-      <button class="hw-dict-btn" id="hdOk" style="background:var(--accent-d);">提交 ✓</button>
-      <button class="hw-dict-btn" id="hdNext" style="background:var(--accent-d);display:none;">➡️ 下一个</button>
+      <button class="hw-dict-btn" id="hdNext" style="background:var(--accent-d);">➡️ 下一个</button>
       <button class="hw-dict-btn" id="hdQuit" style="background:#9a8a96;">结束</button>
     </div>
   </div>`;
@@ -13745,25 +13827,21 @@ function hwDictStart(iso, itemId, words, imgs){
   const $ = id => document.getElementById(id);
   const st = hwDictState;
   const curWord = () => st.words[st.idx];
-  const showProg = ()=>{ $('hdProg').textContent = `《${st.title||'听写'}》第 ${st.idx+1}/${st.words.length} 个`; };
-  const play = ()=>{ const w = curWord(); hwSpeakTwice(w, /[a-zA-Z]/.test(w)); };   // 每个词自动播两遍
-  const ask = ()=>{ st.phase = 'input'; showProg(); $('hdWord').textContent = '🎧 听'; $('hdInput').value=''; $('hdFb').textContent=''; $('hdFb').style.color='';
-    $('hdOk').style.display=''; $('hdSkip').style.display=''; $('hdNext').style.display='none'; $('hdInput').disabled = false;
-    setTimeout(play, 350); $('hdInput').focus(); };
+  const play = ()=>{ const w = curWord(); hwSpeakTwice(w, /[a-zA-Z]/.test(w)); };   // 每个词自动播两遍（间隔 1.5 秒）
+  const ask = ()=>{
+    st.phase = 'play';
+    $('hdProg').textContent = `《${st.title||'听写'}》第 ${st.idx+1}/${st.words.length} 个`;
+    $('hdWord').textContent = '🎧 听';
+    $('hdNext').textContent = (st.idx + 1 >= st.words.length) ? '🏁 听完了' : '➡️ 下一个';
+    setTimeout(play, 350);
+  };
   const finish = ()=>{
     st.phase = 'done';
-    const total = st.words.length;
-    let score = 0; const wrong = [];
-    st.words.forEach((w, i) => {
-      const ok = st.answers[i] != null && hwNormAns(st.answers[i]) === hwNormAns(w);
-      if(ok) score++; else wrong.push({ w, a: st.answers[i] == null ? '（跳过）' : st.answers[i] });
-    });
-    saveHwResult(st.iso, st.itemId, { score, total, wrong: wrong.map(x=>x.w), at: Date.now() });
-    mask.innerHTML = `<div class="hw-dict-pop">
-      <div class="hw-dict-score">${score>=total*0.8 ? '🎉' : '💪'} ${score} / ${total}</div>
-      <div class="hw-dict-fb" style="color:var(--title);">${score===total?'全对！太棒啦！':(score>=total*0.8?'听写很棒，继续加油！':'再练一练就会更棒～')}</div>
-      ${wrong.length ? `<div class="hw-dict-wrong">❌ 写错的词：${wrong.map(x=>`<b>${esc(x.w)}</b><span style="color:var(--nav-ink-soft);">（你写的：${esc(x.a)}）</span>`).join('、')}</div>` : ''}
-      <div class="hw-dict-btns" style="margin-top:12px;">
+    mask.innerHTML = `<div class="hw-dict-pop" style="max-width:340px;">
+      <div style="font-size:30px;">📖</div>
+      <div style="font-weight:700;margin:4px 0 2px;">听写完成！对照下面的词表检查吧</div>
+      <div style="max-height:180px;overflow-y:auto;text-align:left;background:rgba(127,127,127,.08);border-radius:12px;padding:10px 12px;margin:10px 0;font-size:14px;line-height:1.9;">${st.words.map((wd,i)=>`<span style="display:inline-block;margin-right:12px;"><b style="color:var(--accent-d,#7a5fb0);">${i+1}.</b>${esc(wd)}</span>`).join('')}</div>
+      <div class="hw-dict-btns" style="margin-top:10px;">
         ${(st.imgs && st.imgs.length) || st.img ? `<button class="hw-dict-btn" id="hdViewImg" style="background:var(--accent-d);">📖 查看听写内容${st.imgs && st.imgs.length > 1 ? `（${st.imgs.length} 页）` : ''}</button>` : ''}
         <button class="hw-dict-btn" id="hdAgain">🔄 再听写一遍</button>
         <button class="hw-dict-btn" id="hdClose" style="background:#9a8a96;">完成</button>
@@ -13776,30 +13854,13 @@ function hwDictStart(iso, itemId, words, imgs){
     document.getElementById('hdAgain').onclick = ()=>{ mask.remove(); openDictation(iso, itemId); };
     document.getElementById('hdClose').onclick = ()=>{ mask.remove(); hwDictState = null; render(); };
   };
-  const submit = ()=>{
-    if(st.phase !== 'input') return;
-    const v = $('hdInput').value.trim();
-    if(!v){ $('hdFb').textContent = '先听，再把听到的写下来哦～'; $('hdFb').style.color = '#c46a6a'; return; }
-    const ok = hwNormAns(v) === hwNormAns(curWord());
-    st.answers[st.idx] = v;
-    $('hdFb').textContent = ok ? '✅ 对啦！点「下一个」继续～' : '❌ 这个词是「' + curWord() + '」，点「下一个」继续～';
-    $('hdFb').style.color = ok ? '#5aa06a' : '#c46a6a';
-    st.phase = 'waitnext';
-    $('hdInput').disabled = true;
-    $('hdOk').style.display='none'; $('hdSkip').style.display='none';
-    const nx = $('hdNext'); nx.style.display='';
-    nx.textContent = (st.idx + 1 >= st.words.length) ? '🏁 看成绩' : '➡️ 下一个';
-  };
   const goNext = ()=>{
-    if(st.phase === 'waitnext'){ st.idx++; st.idx >= st.words.length ? finish() : ask(); }
-    else { st.answers[st.idx] = null; st.idx++; st.idx >= st.words.length ? finish() : ask(); }
+    st.idx++;
+    st.idx >= st.words.length ? finish() : ask();
   };
   $('hdPlay').onclick = play;
-  $('hdOk').onclick = submit;
   $('hdNext').onclick = goNext;
-  $('hdSkip').onclick = goNext;
   $('hdQuit').onclick = ()=>{ mask.remove(); hwDictState = null; };
-  $('hdInput').addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
   ask();
 }
 
