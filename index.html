@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609186" />
+<meta name="build-version" content="202609187" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10205,40 +10205,43 @@ function hwVisionConfirm(items, i, origItem){
   };
 }
 
-/* 「📷 传词表」：家长端上传词表照片（可多张，如词表分页）→ AI 逐张高清识别 → 去重合并生成听写词 → 填入词表输入框（全部照片随作业存档） */
+/* 「📷 传词表」：家长端上传词表照片（可多张）→ AI 逐张识别（单张失败不中断，已识别的照常带出）→ 去重合并 → 弹词表确认弹窗（可增删改）→ 确认后填入词表输入框（全部照片随作业存档） */
 async function hwEditorDictPhoto(i, files, btn){
   const it = hwEdit && hwEdit.items[i];
   const arr = (files && files.length) ? Array.from(files).slice(0, 5) : (files ? [files] : []);   // FileList → 数组；单个 File 兼容
   if(!it || !arr.length) return;
   const old = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = '🤖 识别中…'; }
-  const all = []; const saves = [];
-  try {
-    for(let k = 0; k < arr.length; k++){
-      if(btn) btn.textContent = '🤖 识别中 ' + (k+1) + '/' + arr.length + '…';
+  const all = []; const saves = []; let okN = 0;
+  for(let k = 0; k < arr.length; k++){
+    if(btn) btn.textContent = '🤖 识别中 ' + (k+1) + '/' + arr.length + '…';
+    try {
       const img = await hwCompressImage(arr[k], 1500, 0.8);   // 高清版喂给 AI，课本小字更清楚
       try { saves.push(await hwCompressImage(arr[k], 800, 0.5)); } catch(e) { saves.push(img); }
       const words = await hwExtractWordsFromImg(img);
-      if(words) all.push(...words);
-    }
-    if(!all.length) throw new Error('no words');
-    const uniq = [];
-    const seen = new Set();
-    for(const w of all){ const t = String(w).trim(); const key = t.toLowerCase(); if(t && !seen.has(key)){ seen.add(key); uniq.push(t); } }
-    if(!it.dict || !Array.isArray(it.dict.words) || !it.dict.words.length){
-      it.dict = { words: uniq.slice(0, 40) };   // 原本没词表 → 直接填
-    } else {
-      const seen2 = new Set(it.dict.words.map(x => String(x).toLowerCase()));
-      for(const w of uniq){ const key = String(w).toLowerCase(); if(!seen2.has(key)){ seen2.add(key); it.dict.words.push(w); } }
-      it.dict.words = it.dict.words.slice(0, 40);   // 已有词表 → 新词追加在后面（去重）
-    }
-    if(saves.length){ it._imgSaveArr = saves; it._imgSave = saves[0]; }
-    try{ showToast('✅ 已识别 ' + it.dict.words.length + ' 个词（' + arr.length + ' 张照片），保存后同步'); }catch(e){}
-  } catch(e) {
-    try{ showToast('⚠️ 词表没认出来，换张清楚一点的照片试试～'); }catch(e2){}
+      if(words && words.length){ all.push(...words); okN++; }
+    } catch(e) { /* 单张失败：跳过继续下一张，已识别的词保留 */ }
   }
   if(btn){ btn.disabled = false; btn.textContent = old; }
-  renderHwEditor();   // 重渲染让词表填进输入框，可继续手动增删
+  if(saves.length){ it._imgSaveArr = saves; it._imgSave = saves[0]; }   // 照片照常存档（孩子端听写完可查看）
+  // 与已有词表合并去重（已有词在前，新识别的词追加在后）
+  const merged = []; const seen = new Set();
+  const base = (it.dict && Array.isArray(it.dict.words)) ? it.dict.words : [];
+  for(const w of base.concat(all)){ const t = String(w).trim(); const key = t.toLowerCase(); if(t && !seen.has(key)){ seen.add(key); merged.push(t); } }
+  if(!merged.length){   // 一张都没识别出来 → 保持原状提示重试
+    try{ showToast('⚠️ 词表没认出来，换张清楚一点的照片试试～'); }catch(e2){}
+    renderHwEditor();
+    return;
+  }
+  let subtitle;
+  if(okN === arr.length){ subtitle = '点词语可修改，点 ✕ 删除，下面还能添加新词'; }
+  else if(okN > 0){ subtitle = '有 ' + (arr.length - okN) + ' 张没识别成功，已带出认出的词——可在此手动补充修改'; }
+  else { subtitle = '这次没识别出新词，可在下面修改已有词表或补充新词'; }
+  hwWordsEditPopup(merged.slice(0, 60), finalWords => {
+    it.dict = { words: finalWords.slice(0, 40) };
+    try{ showToast('✅ 词表已更新（' + it.dict.words.length + ' 个词），记得保存作业～'); }catch(e){}
+    renderHwEditor();   // 词表填进输入框，可继续手动微调后保存
+  }, null, subtitle, '✅ 填入词表');
 }
 /* 「📎 仅传图片」：不走 AI 识别，直接把照片挂到这条作业上（识别失败时的兜底入口） */
 async function hwEditorAttach(i, file, btn){
@@ -13730,10 +13733,9 @@ async function hwDictFromImg(iso, itemId, inputs){
     hwDictUploadPrompt(iso, itemId, 'AI 没认出词表，换一张清楚一点的照片试试～');
   }
 }
-/* 词表确认弹窗：显示识别出的词语（点 ✕ 删除、点词语修改、输入框添加），确认后开始听写 */
-function hwDictEditWords(iso, itemId, words){
-  const it = hwItems(iso).find(x => x.id === itemId);
-  if(!it) return;
+/* 词表确认弹窗（通用）：显示识别出的词语（点 ✕ 删除、点词语修改、输入框添加）。
+   确认回调收到最终词表——孩子端确认后存作业并开始听写；家长端确认后填进编辑卡词表输入框 */
+function hwWordsEditPopup(words, onConfirm, onRetake, subtitle, goText){
   const oldM = document.getElementById('hwDictMask');
   if(oldM) oldM.remove();
   let list = (words && words.length) ? words.map(x => String(x).trim()).filter(Boolean) : [];
@@ -13742,15 +13744,15 @@ function hwDictEditWords(iso, itemId, words){
   mask.innerHTML = `<div class="hw-dict-pop" style="max-width:340px;">
     <div style="font-size:30px;">📋</div>
     <div style="font-weight:700;margin:4px 0 2px;">识别到 <span id="hdWc">${list.length}</span> 个词</div>
-    <div style="font-size:12px;color:var(--nav-ink-soft,#888);">点词语可修改，点 ✕ 删除，下面还能添加新词</div>
+    <div style="font-size:12px;color:var(--nav-ink-soft,#888);">${esc(subtitle || '点词语可修改，点 ✕ 删除，下面还能添加新词')}</div>
     <div id="hdChips" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:12px 0 4px;max-height:200px;overflow-y:auto;"></div>
     <div style="display:flex;gap:6px;justify-content:center;margin:10px 0 2px;">
       <input id="hdAddInp" autocomplete="off" placeholder="输入词语添加" style="width:150px;padding:8px 10px;border-radius:10px;border:2px solid var(--accent-soft,#e7dff0);font-size:14px;">
       <button class="hw-dict-btn" id="hdAddBtn" style="background:var(--accent-d);">➕ 添加</button>
     </div>
     <div class="hw-dict-btns" style="margin-top:12px;">
-      <button class="hw-dict-btn" id="hdWRe" style="background:#8a7fa8;">📷 重新拍照</button>
-      <button class="hw-dict-btn" id="hdWGo" style="background:#5aa06a;">▶️ 开始听写</button>
+      ${onRetake ? `<button class="hw-dict-btn" id="hdWRe" style="background:#8a7fa8;">📷 重新拍照</button>` : ''}
+      <button class="hw-dict-btn" id="hdWGo" style="background:#5aa06a;">${esc(goText || '▶️ 开始听写')}</button>
       <button class="hw-dict-btn" id="hdWCancel" style="background:#9a8a96;">取消</button>
     </div>
   </div>`;
@@ -13789,16 +13791,26 @@ function hwDictEditWords(iso, itemId, words){
   };
   document.getElementById('hdAddBtn').onclick = addWord;
   document.getElementById('hdAddInp').addEventListener('keydown', e => { if(e.key === 'Enter') addWord(); });
-  document.getElementById('hdWRe').onclick = ()=>{ mask.remove(); hwDictUploadPrompt(iso, itemId); };
+  const reBtn = document.getElementById('hdWRe');
+  if(reBtn) reBtn.onclick = ()=>{ mask.remove(); onRetake && onRetake(); };
   document.getElementById('hdWCancel').onclick = ()=>{ mask.remove(); };
   document.getElementById('hdWGo').onclick = ()=>{
     if(!list.length){ try{ showToast('词表是空的，先添加几个词哦～'); }catch(e){} return; }
-    it.dict = { words: list.slice(0, 60) };
-    saveHW();   // 确认后的词表存进作业，同步全家
+    const finalWords = list.slice(0, 60);
     mask.remove();
+    onConfirm && onConfirm(finalWords);
+  };
+}
+/* 孩子端词表确认：确认后存进作业（同步全家）并开始听写 */
+function hwDictEditWords(iso, itemId, words){
+  const it = hwItems(iso).find(x => x.id === itemId);
+  if(!it) return;
+  hwWordsEditPopup(words, finalWords => {
+    it.dict = { words: finalWords.slice(0, 60) };
+    saveHW();   // 确认后的词表存进作业，同步全家
     try{ showToast('✅ 词表已保存（' + it.dict.words.length + ' 个词），开始听写！'); }catch(e){}
     hwDictStart(iso, itemId, it.dict.words.slice(), it.imgs && it.imgs.length ? it.imgs : (it.img ? [it.img] : null));
-  };
+  }, ()=> hwDictUploadPrompt(iso, itemId));
 }
 /* 听写入口路由：有词表直接开始；有词表图片 → AI 自动生成；两者都没有 → 弹上传入口 */
 function openDictation(iso, itemId){
