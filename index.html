@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609197" />
+<meta name="build-version" content="202609198" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1536,6 +1536,8 @@
   .hw-ed-btns { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
   .hw-photo-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px; }
   .hw-thumb { width:44px; height:44px; object-fit:cover; border-radius:10px; border:2px solid var(--accent-soft); box-shadow:0 2px 6px rgba(0,0,0,.12); }
+  .hw-thumb-w { position:relative; flex:0 0 auto; display:inline-block; }
+  .hw-thumb-w .hw-thumb-x { position:absolute; top:-5px; right:-5px; width:17px; height:17px; border-radius:50%; background:rgba(0,0,0,.6); color:#fff; font-size:10px; font-style:normal; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2; }
   .hw-photo-hint { font-size:11px; color:var(--ink-soft, #999); }
   .hw-date-row { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
   .hw-date-row input[type=date] { border:1.5px solid var(--accent-soft); border-radius:10px; padding:6px 8px; font-size:13px; font-family:inherit; background:var(--card); color:var(--ink); }
@@ -10178,8 +10180,12 @@ async function hwEditorPhoto(i, file, btn){
   if(btn){ btn.disabled = true; btn.textContent = '📷 识别中…'; }
   try {
     const dataUrl = await hwCompressImage(file, 1100, 0.72);
+    it._imgBase = (it._imgSaveArr && it._imgSaveArr.length) ? it._imgSaveArr.length : 0;   // 本次上传前已有张数（取消识别时回滚用）
     it._img = dataUrl;
     try { it._imgSave = await hwCompressImage(file, 900, 0.55); } catch(e) { it._imgSave = dataUrl; }   // 存档版：随作业同步，孩子听写完可查看
+    it._imgSaveArr = ((it._imgSaveArr && it._imgSaveArr.length) ? it._imgSaveArr
+      : ((it.imgs && it.imgs.length) ? it.imgs.filter(Boolean) : (it.img ? [it.img] : []))
+    ).concat([it._imgSave]).slice(0, 9);
     renderHwEditor();
     const card = document.querySelector(`.hw-ed[data-hwi="${i}"] [data-act=vision]`);
     const vBtn = card || btn;
@@ -10207,7 +10213,7 @@ async function hwEditorPhoto(i, file, btn){
             dict: (Array.isArray(t.dict) && t.dict.length) ? { words: t.dict.map(w=>String(w).trim()).filter(Boolean).slice(0, 15) } : null
           };
           if(idx === 0) item._img = it._img;                       // 编辑卡预览
-          if(item.dict && savedImg) item.img = savedImg;           // 听写项挂照片，孩子听写完可查看
+          if(item.dict && savedImg){ item.img = savedImg; item.imgs = [savedImg]; }   // 听写项挂照片，孩子听写完可查看
           return item;
         };
         const items = arr.slice(0, 8).map((t, idx) => mk(t && typeof t === 'object' ? t : {}, idx)).filter(x => x.title);
@@ -10257,6 +10263,7 @@ function hwVisionConfirm(items, i, origItem){
   };
   document.getElementById('hwVisionCancel').onclick = ()=>{
     delete origItem._img; delete origItem._imgSave;   // 取消 → 撤掉照片预览，原卡保持原样
+    origItem._imgSaveArr = (origItem._imgSaveArr || []).slice(0, origItem._imgBase || 0);   // 回滚本次上传追加的存档图
     close();
   };
 }
@@ -10299,20 +10306,33 @@ async function hwEditorDictPhoto(i, files, btn){
     renderHwEditor();   // 词表填进输入框，可继续手动微调后保存
   }, null, subtitle, '✅ 填入词表');
 }
-/* 「📎 仅传图片」：不走 AI 识别，直接把照片挂到这条作业上（识别失败时的兜底入口） */
-async function hwEditorAttach(i, file, btn){
+/* 「📎 仅存图」：不走 AI 识别，照片直接挂到这条作业上；支持一次多选（最多 9 张，可追加），保存后孩子端首页 🖼️ 可逐张查看 */
+async function hwEditorAttach(i, files, btn){
   const it = hwEdit && hwEdit.items[i];
-  if(!it || !file) return;
-  const old = btn.textContent;
-  btn.disabled = true; btn.textContent = '📎 处理中…';
-  try {
-    it._img = await hwCompressImage(file, 1100, 0.72);
-    try { it._imgSave = await hwCompressImage(file, 900, 0.55); } catch(e) { it._imgSave = it._img; }
-    try{ showToast('📎 图片已挂上，保存后孩子端可查看'); }catch(e){}
-  } catch(e) {
+  const arr = (files && files.length) ? Array.from(files) : (files ? [files] : []);   // FileList → 数组；单个 File 兼容
+  if(!it || !arr.length) return;
+  const old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '📎 处理中…'; }
+  const saves = [];
+  for(let k = 0; k < arr.length && saves.length < 9; k++){
+    if(btn) btn.textContent = '📎 处理中 ' + (k+1) + '/' + arr.length + '…';
+    try {
+      const big = await hwCompressImage(arr[k], 1100, 0.72);
+      let sv; try { sv = await hwCompressImage(arr[k], 900, 0.55); } catch(e) { sv = big; }
+      saves.push(sv);
+      if(k === 0 && !it._img) it._img = big;   // 首张兼作编辑卡预览
+    } catch(e) { /* 单张失败跳过 */ }
+  }
+  if(btn){ btn.disabled = false; btn.textContent = old; }
+  if(saves.length){
+    it._imgSaveArr = ((it._imgSaveArr && it._imgSaveArr.length) ? it._imgSaveArr
+      : ((it.imgs && it.imgs.length) ? it.imgs.filter(Boolean) : (it.img ? [it.img] : []))
+    ).concat(saves).slice(0, 9);
+    it._imgSave = it._imgSaveArr[0];
+    try{ showToast('📎 已挂上 ' + saves.length + ' 张图（共 ' + it._imgSaveArr.length + ' 张），保存后孩子端可查看'); }catch(e){}
+  } else {
     try{ showToast('⚠️ 图片处理失败，请重试'); }catch(e2){}
   }
-  btn.disabled = false; btn.textContent = old;
   renderHwEditor();
 }
 /* 通用图片全屏查看浮层（支持单张或多张数组，点任意处关闭） */
@@ -13709,7 +13729,7 @@ function hwItemCard(iso, it, seq){
   const isDict = it.dict && Array.isArray(it.dict.words) && it.dict.words.length > 0;
   const canDict = isDict || (!!it.img && hwIsDictation(it));   // 听写类作业：有词表或有词表图片都可开始
   return `<div class="hw-item ${it.done ? 'done' : ''}" data-hwdone="${esc(it.id)}" data-hwdate="${esc(iso)}">
-    <div class="hw-top"><span class="hw-check">${it.done ? '✅' : '⭕'}</span>${seq ? `<span class="hw-seq">${seq}</span>` : ''}<span class="hw-sub">${hwSubEmoji(it.sub)} ${esc(it.sub||'其他')}</span><span class="hw-title">${esc(it.title||'')}</span></div>
+    <div class="hw-top"><span class="hw-check">${it.done ? '✅' : '⭕'}</span>${seq ? `<span class="hw-seq">${seq}</span>` : ''}<span class="hw-sub">${hwSubEmoji(it.sub)} ${esc(it.sub||'其他')}</span><span class="hw-title">${esc(it.title || (((it.imgs && it.imgs.length) || it.img) ? '📎 图片作业' : ''))}</span></div>
     <div class="hw-actions">
       ${canDict ? `<button class="hw-dict-btn" data-hwdict="${esc(it.id)}" data-hwdate="${esc(iso)}">🎧 开始听写</button>` : ''}
       ${isDict ? `<span class="hw-dict-res">共 ${it.dict.words.length} 词</span>` : ''}
@@ -13745,7 +13765,7 @@ function hwHomeRow(iso, it, seq){
   const res = hwResult(iso, it.id);
   return `<div class="hw-row ${it.done ? 'done' : ''}" data-hwdone="${esc(it.id)}" data-hwdate="${esc(iso)}">
     <span class="hw-seq">${seq}</span>
-    <span class="hw-row-title">${esc(it.title||'')}</span>
+    <span class="hw-row-title">${esc(it.title || (((it.imgs && it.imgs.length) || it.img) ? '📎 图片作业' : ''))}</span>
     ${canDict ? `<button class="hw-dict-btn" data-hwdict="${esc(it.id)}" data-hwdate="${esc(iso)}">🎧</button>` : ''}
     ${it.img ? `<button class="hw-dict-btn" data-hwimg="${esc(it.id)}" data-hwdate="${esc(iso)}">🖼️</button>` : ''}
     ${res ? `<span class="hw-row-score">✍️${res.score}/${res.total}</span>` : ''}
@@ -13824,7 +13844,12 @@ ${hwIsDictation(it) ? '这份作业和听写有关，请同时出词表。' : ''
 /* 家长编辑器状态（家长审核页内） */
 let hwEdit = null;   // { date:'YYYY-MM-DD', items:[...], oldIds:[...] }
 function hwEditLoad(dateISO){
-  const items = hwItems(dateISO).map(it => JSON.parse(JSON.stringify(it)));
+  const items = hwItems(dateISO).map(it => {
+    const c = JSON.parse(JSON.stringify(it));
+    /* 统一图片草稿：历史 imgs/img 归入 _imgSaveArr，编辑器内可增删，保存时整体写回 imgs */
+    c._imgSaveArr = (c.imgs && c.imgs.length) ? c.imgs.filter(Boolean).slice() : (c.img ? [c.img] : []);
+    return c;
+  });
   hwEdit = { date: dateISO, items, oldIds: items.map(x => x.id).filter(Boolean) };   // oldIds：本次编辑会话开始时已保存的条目 id（保存时对比得出「被删除的条目」→ 写入墓碑）
 }
 function hwEditDirtyDate(){
@@ -13850,9 +13875,10 @@ function renderHwEditor(){
       <div class="hw-ed-row hw-photo-row">
         <button class="hw-dict-btn" data-act="vision" data-i="${i}" style="background:var(--accent-d);">📷 上传图片</button>
         <button class="hw-dict-btn" data-act="attach" data-i="${i}" style="background:#8a7fa8;">📎 仅存图</button>
-        ${thumbs.map(u => `<img class="hw-thumb" src="${u}" alt="作业图片">`).join('')}
+        ${thumbs.map((u, k) => `<span class="hw-thumb-w"><img class="hw-thumb" src="${u}" alt="作业图片${k+1}"><i class="hw-thumb-x" data-tx="${i}-${k}" title="删除这张">✕</i></span>`).join('')}
         <span class="hw-photo-hint">AI 自动解析任务；也可直接粘贴截图</span>
         <input type="file" data-f="photo" accept="image/*" style="display:none;">
+        <input type="file" data-f="attachphoto" accept="image/*" multiple style="display:none;">
       </div>
       <div class="hw-ed-btns">
         <button class="hw-dict-btn" data-act="del" data-i="${i}" style="background:#c46a6a;">🗑️ 删除</button>
@@ -13909,8 +13935,17 @@ function renderHwEditor(){
   box.querySelectorAll('[data-act=attach]').forEach(b => {
     b.onclick = ()=>{
       const i = Number(b.dataset.i);
-      const inp = b.closest('.hw-ed').querySelector('[data-f=photo]');
-      if(inp){ inp.onchange = ()=>{ if(inp.files && inp.files[0]) hwEditorAttach(i, inp.files[0], b); inp.value = ''; }; inp.click(); }
+      const inp = b.closest('.hw-ed').querySelector('[data-f=attachphoto]');
+      if(inp){ inp.onchange = ()=>{ if(inp.files && inp.files.length) hwEditorAttach(i, inp.files, b); inp.value = ''; }; inp.click(); }
+    };
+  });
+  /* 缩略图 ✕：从图片草稿里删除某一张 */
+  box.querySelectorAll('[data-tx]').forEach(x => {
+    x.onclick = (ev)=>{
+      if(ev) ev.stopPropagation();
+      const p = (x.dataset.tx || '').split('-');
+      const it = hwEdit && hwEdit.items[Number(p[0])];
+      if(it && it._imgSaveArr){ it._imgSaveArr.splice(Number(p[1]) || 0, 1); renderHwEditor(); }
     };
   });
   const add = document.getElementById('hwAdd');
@@ -13959,10 +13994,11 @@ async function hwEditorSave(saveBtn){
     const dw = card.querySelector('[data-f=dict]').value.split(/[、,，;；\s]+/).map(w=>w.trim()).filter(Boolean);
     it.dict = dw.length ? { words: dw.slice(0,40) } : it.dict;
     it.sub = card.querySelector('[data-f=sub]').value;
-    if(it._imgSaveArr && it._imgSaveArr.length){ it.imgs = it._imgSaveArr; it.img = it._imgSaveArr[0]; }   // 词表多张：全部存档
-    else if(it._imgSave) it.img = it._imgSave;   // 听写内容照片：随作业保存，孩子端可查看
+    if(it._imgSaveArr && it._imgSaveArr.length){ it.imgs = it._imgSaveArr.filter(Boolean).slice(0, 9); it.img = it.imgs[0]; }   // 多张存档（仅存图/词表/识别共用）
+    else if(it._imgSave){ it.imgs = [it._imgSave]; it.img = it._imgSave; }   // 单张存档兼容
+    else { delete it.imgs; }   // 图片被全部删除 → 清空存档
   });
-  hwEdit.items = hwEdit.items.filter(it => (it.title||'').trim());
+  hwEdit.items = hwEdit.items.filter(it => (it.title||'').trim() || (it.imgs && it.imgs.length) || it.img);   // 纯图片条目（无标题）也保留
   // 删除墓碑：本次编辑会话中「原来有、现在没有」的条目 id 记入桶的 dl，防止其他端旧整包回写时复活（同步按墓碑过滤）
   const prevBucket = hw[hwEdit.date] || {};
   const dels = Array.from(new Set([].concat(prevBucket.dl || [], hwEdit.oldIds || [])
