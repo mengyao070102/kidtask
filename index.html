@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609190" />
+<meta name="build-version" content="202609191" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -12482,6 +12482,16 @@ function loadTimetable(){
 }
 let timetable = loadTimetable();
 let ttTs = Number(localStorage.getItem(TT_TS_KEY)) || 0;
+/* 存量修复：旧版「首次启动迁移默认课表」会误抬 ttTs 到当前时间——孩子端从此 ttTs 比家长还大，
+   永远拒绝采纳家长的课表，甚至把默认课表当权威反向覆盖。本机从未人工编辑过课表（无标记）则 ttTs 归零，
+   交还家长端权威；家长端下次编辑 touch 后自然恢复最大。 */
+try {
+  if(!localStorage.getItem('kidtask_tt_edited_v1') && ttTs > 0){
+    ttTs = 0;
+    localStorage.setItem(TT_TS_KEY, '0');
+  }
+} catch(e){}
+function markTTEdited(){ try{ localStorage.setItem('kidtask_tt_edited_v1','1'); }catch(e){} }
 function touchTimetableTs(){
   ttTs = Math.max(ttTs + 1, Date.now());
   try{ localStorage.setItem(TT_TS_KEY, String(ttTs)); }catch(e){}
@@ -12498,6 +12508,7 @@ function setTTCell(d, i, v){
   while(row.length < timetable.periods.length) row.push('');
   row[i] = String(v || '').slice(0, 10);
   timetable.grid[String(d)] = row;
+  markTTEdited();   // 人工编辑：本机获得 ttTs 权威（区别于启动迁移/被动同步）
   saveTimetable();
 }
 /* 把 "08:20" 加上 minutes 分钟，返回 HH:MM */
@@ -12570,7 +12581,7 @@ function renderTimetable(){
           const m = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/.exec(String(v||'').trim());
           if(!m){ try{ showToast('时间格式不对哦，请写成 08:20-09:00'); }catch(e){} return false; }
           timetable.periods[i] = { s:m[1], e:m[2] };
-          saveTimetable(); render(); return true;
+          markTTEdited(); saveTimetable(); render(); return true;
         }
       });
     };
@@ -12580,21 +12591,21 @@ function renderTimetable(){
     const last = timetable.periods[timetable.periods.length-1] || {s:'',e:''};
     const ns = last.e ? last.e : '16:00';
     timetable.periods.push({ s:ns, e:addMinutesHM(ns, 40) });
-    saveTimetable(); render();
+    markTTEdited(); saveTimetable(); render();
   };
   const delBtn = main.querySelector('#ttDelPeriod');
   if(delBtn) delBtn.onclick = ()=>{
     if(timetable.periods.length <= 1) return;
     confirmModal({ message:'确定删除第 '+timetable.periods.length+' 节吗？', confirmText:'删除', danger:true, onConfirm:()=>{
-      timetable.periods.pop(); saveTimetable(); render();
+      timetable.periods.pop(); markTTEdited(); saveTimetable(); render();
     }});
   };
   const wkBtn = main.querySelector('#ttToggleWeekend');
-  if(wkBtn) wkBtn.onclick = ()=>{ timetable.showWeekend = !timetable.showWeekend; saveTimetable(); render(); };
+  if(wkBtn) wkBtn.onclick = ()=>{ timetable.showWeekend = !timetable.showWeekend; markTTEdited(); saveTimetable(); render(); };
   const rsBtn = main.querySelector('#ttReset');
   if(rsBtn) rsBtn.onclick = ()=>{
     confirmModal({ message:'恢复成默认课表？自己排的课会被覆盖哦。', confirmText:'恢复', danger:true, onConfirm:()=>{
-      timetable = normalizeTimetable(null); saveTimetable(); render();
+      timetable = normalizeTimetable(null); markTTEdited(); saveTimetable(); render();
     }});
   };
 }
@@ -14870,7 +14881,13 @@ try {
     const raw = localStorage.getItem(TT_KEY);
     let need = !raw;
     if(!need){ try{ need = isLegacyDefaultTT(JSON.parse(raw)); }catch(e){ need = false; } }
-    if(need) saveTimetable();
+    if(need){
+      /* ⚠️ 静默落盘：绝不 touch ttTs！旧版这里走 saveTimetable() 会把 ttTs 抬到当前时间——
+         孩子端从此 ttTs 比家长还大，永远拒绝采纳家长的课表，还会把默认课表当权威反向覆盖家长端。
+         ttTs 保持 0：任何家长端的真实编辑（ttTs>0）都能正常接管。 */
+      timetable = normalizeTimetable(null);
+      try{ localStorage.setItem(TT_KEY, JSON.stringify(timetable)); }catch(e){}
+    }
   })();
 } catch(e){}
 connectSync();
