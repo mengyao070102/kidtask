@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609198" />
+<meta name="build-version" content="202609199" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -3336,8 +3336,47 @@ const CATS = {
 const REPEATS = {
   once: '不重复', daily: '每天',
   mon: '每周一', tue: '每周二', wed: '每周三', thu: '每周四', fri: '每周五', sat: '每周六', sun: '每周日',
-  weekday: '工作日(周一至五)', weekend: '周末(周六日)'
+  weekday: '工作日(周一至五)', weekend: '周末(周六日)',
+  workday: '法定工作日'
 };
+/* 中国法定节假日 / 调休补班表（依据国务院办公厅每年通知，逐年更新；未知年份回退「周一至周五」规则）
+   · CN_HOLIDAY_DATES：法定放假日期（含调休连休的周末，这些天不算工作日）
+   · CN_MAKEUP_WORKDAYS：调休补班的周六/周日（这些天要上班上学，算工作日）
+   数据来源：
+   · 2025 年：国办发明电〔2024〕7 号
+   · 2026 年：国办发明电〔2025〕7 号（2025-11-04 发布） */
+const CN_HOLIDAY_DATES = {
+  /* 2025 */
+  '2025-01-01':1,
+  '2025-01-28':1,'2025-01-29':1,'2025-01-30':1,'2025-01-31':1,'2025-02-01':1,'2025-02-02':1,'2025-02-03':1,'2025-02-04':1,
+  '2025-04-04':1,'2025-04-05':1,'2025-04-06':1,
+  '2025-05-01':1,'2025-05-02':1,'2025-05-03':1,'2025-05-04':1,'2025-05-05':1,
+  '2025-05-31':1,'2025-06-01':1,'2025-06-02':1,
+  '2025-10-01':1,'2025-10-02':1,'2025-10-03':1,'2025-10-04':1,'2025-10-05':1,'2025-10-06':1,'2025-10-07':1,'2025-10-08':1,
+  /* 2026 */
+  '2026-01-01':1,'2026-01-02':1,'2026-01-03':1,
+  '2026-02-15':1,'2026-02-16':1,'2026-02-17':1,'2026-02-18':1,'2026-02-19':1,'2026-02-20':1,'2026-02-21':1,'2026-02-22':1,'2026-02-23':1,
+  '2026-04-04':1,'2026-04-05':1,'2026-04-06':1,
+  '2026-05-01':1,'2026-05-02':1,'2026-05-03':1,'2026-05-04':1,'2026-05-05':1,
+  '2026-06-19':1,'2026-06-20':1,'2026-06-21':1,
+  '2026-09-25':1,'2026-09-26':1,'2026-09-27':1,
+  '2026-10-01':1,'2026-10-02':1,'2026-10-03':1,'2026-10-04':1,'2026-10-05':1,'2026-10-06':1,'2026-10-07':1
+};
+const CN_MAKEUP_WORKDAYS = {
+  /* 2025 */
+  '2025-01-26':1,'2025-02-08':1,'2025-04-27':1,'2025-09-28':1,'2025-10-11':1,
+  /* 2026 */
+  '2026-01-04':1,'2026-02-14':1,'2026-02-28':1,'2026-05-09':1,'2026-09-20':1,'2026-10-10':1
+};
+/* 某天是否为「法定工作日」：调休补班的周末算，法定假期（含连休周末）不算，其余按周一至周五 */
+function isCnWorkday(d){
+  if(!d || isNaN(d)) return false;
+  const iso = fmtISO(d);
+  if(CN_MAKEUP_WORKDAYS[iso]) return true;
+  if(CN_HOLIDAY_DATES[iso]) return false;
+  const wd = d.getDay();
+  return wd >= 1 && wd <= 5;
+}
 
 /* 年级与单元测试题库（内置样例，按年级自动展示） */
 const GKEY = 'kidtask_grade_v1';
@@ -11625,6 +11664,7 @@ function taskMatchesDate(t, d){
     case 'daily':  return true;
     case 'weekday':return wd>=1 && wd<=5;   // 周一至周五
     case 'weekend':return wd===0 || wd===6; // 周六、日
+    case 'workday':return isCnWorkday(d);   // 法定工作日：扣除法定节假日、加上调休补班日
     case 'mon': return wd===1; case 'tue': return wd===2; case 'wed': return wd===3;
     case 'thu': return wd===4; case 'fri': return wd===5; case 'sat': return wd===6;
     case 'sun': return wd===0;
