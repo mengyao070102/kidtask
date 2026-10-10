@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609200" />
+<meta name="build-version" content="202609201" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -12990,6 +12990,7 @@ function menuEditPopup(off){
       <div class="me-table">${rowsHtml}</div>
       <div class="modal-actions">
         <button class="btn cancel" id="meCancel">取消</button>
+        <button class="btn" id="meSync" style="background:var(--accent-d);color:#fff;">📤 立即同步</button>
         <button class="btn primary" id="meOk">保存</button>
       </div>
     </div>`;
@@ -12997,6 +12998,21 @@ function menuEditPopup(off){
   const close = ()=>{ ov.remove(); menuEditDraft = null; };
   ov.querySelector('#meCancel').onclick = close;
   ov.onclick = (e)=>{ if(e.target===ov) close(); };
+  /* 落盘当前草稿（照片 + 七天文字），返回是否成功写入 */
+  const applyDraft = ()=>{
+    if(!menu.weeks[weekKeyOf(weekOff)]) menu.weeks[weekKeyOf(weekOff)] = { days:{} };
+    const bucket = menu.weeks[weekKeyOf(weekOff)];
+    const wImgs = (menuEditDraft && Array.isArray(menuEditDraft.weekImgs)) ? menuEditDraft.weekImgs.filter(x=>x).slice(0, 6) : [];
+    bucket.imgs = wImgs;
+    bucket.img = wImgs[0] || '';   // 旧版本客户端只读 img，保持=第一张
+    const days = bucket.days;
+    ov.querySelectorAll('.me-in').forEach(inp=>{
+      const d = inp.dataset.d, f = inp.dataset.f;
+      if(!days[d]) days[d] = {};
+      days[d][f] = String(inp.value || '').trim().slice(0, 60);
+    });
+    return true;
+  };
   /* 缩略图列表：每张带 ✕ 可单独删除 */
   const paintWeekThumbs = ()=>{
     const list = ov.querySelector('#meWeekThumbList');
@@ -13035,18 +13051,22 @@ function menuEditPopup(off){
     if(menuEditDraft && menuEditDraft.weekImgs.length) paintWeekThumbs();
     fin.value = '';
   };
+  /* 📤 立即同步：保存草稿后强制立即发布（绕过自动同步的防抖/静默跳过），同时向其他设备拉取对齐。
+     自动推送偶尔因「未连接/应用远端中」被静默跳过，这里给一个手动补推入口（与课程表同款）。 */
+  ov.querySelector('#meSync').onclick = ()=>{
+    applyDraft();
+    saveMenu();   // 落盘 + touchMenuTs + 常规 pushSync（自动刷新首页卡片）
+    if(!syncConnected || !mqttClient){
+      try{ connectSync(); }catch(e){}
+      try{ showToast('⚠️ 当前同步未连接，菜谱已存本机；已尝试重连，连上后会自动补发'); }catch(e){}
+      return;
+    }
+    try{ pushSync(true); }catch(e){}
+    try{ requestState(); }catch(e){}
+    try{ showToast('📤 ' + weekName + '菜谱已同步发送给家里的其他设备'); }catch(e){}
+  };
   ov.querySelector('#meOk').onclick = ()=>{
-    if(!menu.weeks[weekKeyOf(weekOff)]) menu.weeks[weekKeyOf(weekOff)] = { days:{} };
-    const bucket = menu.weeks[weekKeyOf(weekOff)];
-    const wImgs = (menuEditDraft && Array.isArray(menuEditDraft.weekImgs)) ? menuEditDraft.weekImgs.filter(x=>x).slice(0, 6) : [];
-    bucket.imgs = wImgs;
-    bucket.img = wImgs[0] || '';   // 旧版本客户端只读 img，保持=第一张
-    const days = bucket.days;
-    ov.querySelectorAll('.me-in').forEach(inp=>{
-      const d = inp.dataset.d, f = inp.dataset.f;
-      if(!days[d]) days[d] = {};
-      days[d][f] = String(inp.value || '').trim().slice(0, 60);
-    });
+    applyDraft();
     saveMenu(); close(); render();
     try{ showToast('🍱 ' + weekName + '菜谱已保存并同步'); }catch(e){}
   };
