@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609199" />
+<meta name="build-version" content="202609200" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -12668,8 +12668,9 @@ function renderTimetable(){
       <button class="btn" id="ttDelPeriod"${timetable.periods.length<=1?' disabled':''}>➖ 减一节课</button>
       <button class="btn" id="ttToggleWeekend">${timetable.showWeekend?'隐藏周末':'显示周末'}</button>
       <button class="btn" id="ttReset">恢复默认课表</button>
+      <button class="btn" id="ttSyncBtn" style="background:var(--accent-d);color:#fff;">📤 立即同步</button>
     </div>
-    <div class="tt-tip">点格子可以改科目（留空就是没课），点左边「第 N 节」可以改上课时间。改完会自动同步到家里的其他设备。</div>`
+    <div class="tt-tip">点格子可以改科目（留空就是没课），点左边「第 N 节」可以改上课时间。改完会自动同步；如果孩子端没收到，点「📤 立即同步」手动推一次。</div>`
     : `<div class="tt-tip">这是爸爸妈妈排好的课表，想调整的话可以请爸爸妈妈帮忙哦～</div>`}`;
 
   if(!canEdit) return;
@@ -12723,6 +12724,21 @@ function renderTimetable(){
     confirmModal({ message:'恢复成默认课表？自己排的课会被覆盖哦。', confirmText:'恢复', danger:true, onConfirm:()=>{
       timetable = normalizeTimetable(null); markTTEdited(); saveTimetable(); render();
     }});
+  };
+  /* 📤 立即同步：自动推送偶尔因「未连接/应用远端中」被静默跳过，这里给一个手动补推入口——
+     强制立即发布本机课表（force 绕过防抖），同时向其他设备发起拉取请求（双向对齐） */
+  const syncBtn = main.querySelector('#ttSyncBtn');
+  if(syncBtn) syncBtn.onclick = ()=>{
+    markTTEdited(); touchTimetableTs();   // 保险：确保本端 ttTs 权威且为最新（重复编辑也无害）
+    try{ localStorage.setItem(TT_KEY, JSON.stringify(timetable)); }catch(e){}
+    if(!syncConnected || !mqttClient){
+      try{ connectSync(); }catch(e){}
+      try{ showToast('⚠️ 当前同步未连接，课表已存本机；已尝试重连，连上后会自动补发'); }catch(e){}
+      return;
+    }
+    pushSync(true);
+    try{ requestState(); }catch(e){}
+    try{ showToast('📤 课程表已同步发送给家里的其他设备'); }catch(e){}
   };
 }
 
