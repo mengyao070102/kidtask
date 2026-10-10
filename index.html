@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609196" />
+<meta name="build-version" content="202609197" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1611,7 +1611,10 @@
   .me-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
   .me-thumb .me-thumb-x { position:absolute; top:-1px; right:-1px; width:15px; height:15px; border-radius:0 0 0 9px; background:rgba(0,0,0,.55); color:#fff; font-size:9px; font-style:normal; display:flex; align-items:center; justify-content:center; cursor:pointer; }
   /* 编辑弹窗：单个「上传一周菜谱」按钮 + 预览 */
-  .me-weekimg-row { display:flex; align-items:center; gap:10px; margin:2px 0 10px; }
+  .me-weekimg-row { display:flex; align-items:center; gap:10px; margin:2px 0 10px; flex-wrap:wrap; }
+  .me-thumb-list { display:flex; flex-wrap:wrap; gap:6px; }
+  .me-thumb-list.hide { display:none; }
+  .mc-weekimg img + img { margin-top:8px; }
   .me-weekphoto { border:none; background:linear-gradient(160deg,var(--accent,#e75480),var(--accent-d,#ff6fa5)); color:#fff; font-size:14px; font-weight:800; padding:9px 18px; border-radius:999px; cursor:pointer; box-shadow:0 3px 10px rgba(231,84,128,.28); }
   .me-weekphoto:active { transform:scale(.97); }
   .me-weekphoto:disabled { opacity:.6; }
@@ -12706,11 +12709,19 @@ function normalizeMenu(o){
     const src = (o.weeks && typeof o.weeks === 'object') ? o.weeks : {};
     Object.keys(src).forEach(k=>{
       if(!/^\d{4}-W\d{1,2}$/.test(String(k))) return;
-      weeks[k] = { days: normalizeMenuDays(src[k] && src[k].days), img: String((src[k] && src[k].img) || '').slice(0, 400000) };
+      const b = src[k] || {};
+      /* imgs：多张整周菜谱照片（最多 6 张）；旧版单张 img 兼容并入 imgs[0]；img 始终=imgs[0]（旧版本客户端可读） */
+      let imgs = Array.isArray(b.imgs) ? b.imgs.filter(x=>typeof x === 'string' && x).map(x=>x.slice(0, 400000)) : [];
+      if(!imgs.length && b.img) imgs = [String(b.img).slice(0, 400000)];
+      imgs = imgs.slice(0, 6);
+      weeks[k] = { days: normalizeMenuDays(b.days), imgs, img: imgs[0] || '' };
     });
     if(o.days && typeof o.days === 'object'){   // 旧版单周数据：归入本周桶（本周桶为空才迁入）
       const wk = weekKeyOf(0);
-      if(!menuDaysHasContent((weeks[wk]||{}).days)) weeks[wk] = { days: normalizeMenuDays(o.days), img:(weeks[wk]||{}).img||'' };
+      if(!menuDaysHasContent((weeks[wk]||{}).days) && !((weeks[wk]||{}).imgs||[]).length){
+        const ob = weeks[wk] || { imgs:[], img:'' };
+        weeks[wk] = { days: normalizeMenuDays(o.days), imgs: ob.imgs || [], img: ob.img || '' };
+      }
     }
     return { weeks };
   }catch(e){ return { weeks:{} }; }
@@ -12747,13 +12758,19 @@ function menuWeekDays(off){
   const wk = ((menu.weeks||{})[weekKeyOf(off)]);
   return (wk && wk.days) || null;
 }
-function menuWeekImg(off){
+function menuWeekImgs(off){
   const wk = ((menu.weeks||{})[weekKeyOf(off==null ? menuViewWeek : off)]);
-  return (wk && wk.img) || '';
+  const arr = (wk && Array.isArray(wk.imgs)) ? wk.imgs.filter(x=>x) : [];
+  if(arr.length) return arr;
+  return (wk && wk.img) ? [wk.img] : [];   // 旧数据兼容：单张 img
+}
+function menuWeekImg(off){
+  const a = menuWeekImgs(off);
+  return a[0] || '';
 }
 function menuHasContent(off){
   const o = (off==null ? menuViewWeek : off);
-  return menuDaysHasContent(menuWeekDays(o) || {}) || !!menuWeekImg(o);
+  return menuDaysHasContent(menuWeekDays(o) || {}) || menuWeekImgs(o).length > 0;
 }
 function menuDayRows(d, off){
   const days = menuWeekDays(off==null ? menuViewWeek : off) || {};
@@ -12781,10 +12798,10 @@ function menuCardHtml(wd, off){
       ${mealCell(r, d, 'dinner', '晚餐')}
     </div>`;
   }).join('');
-  /* 整周菜谱照片（如学校发的一周菜单表）：上传了周图就只显示图片，不再显示周一~周日文字行 */
-  const wImg = menuWeekImg(weekOff);
-  const bodyHtml = wImg
-    ? `<div class="mc-weekimg"><img src="${wImg}" data-weekimg="1" alt="${weekName}菜谱照片" title="点击看大图"><span class="mc-weekimg-tip">👆 点图片可放大看</span></div>`
+  /* 整周菜谱照片（如学校发的一周菜单表）：支持多张，上传了就只显示图片，不再显示周一~周日文字行 */
+  const wImgs = menuWeekImgs(weekOff);
+  const bodyHtml = wImgs.length
+    ? `<div class="mc-weekimg">${wImgs.map((src, i)=>`<img src="${src}" data-wimg="${i}" alt="${weekName}菜谱照片${i+1}" title="点击看大图">`).join('')}<span class="mc-weekimg-tip">👆 点图片可放大看${wImgs.length>1?`（共 ${wImgs.length} 张）`:''}</span></div>`
     : (menuHasContent(weekOff) ? `<div class="mc-table">${rows}</div>`
       : `<div class="mc-empty">${canEdit
           ? (weekOff===1 ? '下周菜谱还没排哦～点「✏️ 编辑」提前安排起来吧！' : '本周菜谱还没发布哦～点「✏️ 编辑」写上这一周吃什么吧！')
@@ -12823,8 +12840,13 @@ function menuImgView(src, title){
 function bindMenuCard(card){
   const btn = card.querySelector('#menuEditBtn');
   if(btn) btn.onclick = ()=> menuEditPopup(menuViewWeek);
-  const wImg = card.querySelector('[data-weekimg]');
-  if(wImg) wImg.onclick = ()=> menuImgView(wImg.getAttribute('src'), '一周菜谱');
+  card.querySelectorAll('[data-wimg]').forEach(im=>{
+    im.onclick = ()=>{
+      const all = Array.from(card.querySelectorAll('[data-wimg]'));
+      const idx = all.indexOf(im);
+      menuImgView(im.getAttribute('src'), '一周菜谱 ' + (idx+1) + '/' + all.length);
+    };
+  });
   card.querySelectorAll('.mc-img').forEach(im=>{
     im.onclick = ()=>{
       const row = im.closest('.mc-row');
@@ -12869,7 +12891,7 @@ function menuEditPopup(off){
   const weekName = weekOff === 1 ? '下周' : '本周';
   const ov = document.createElement('div');
   ov.className = 'overlay';
-  menuEditDraft = { weekImg: menuWeekImg(weekOff) };   // 草稿：整周菜谱照片（异步压缩，保存时统一落盘）
+  menuEditDraft = { weekImgs: menuWeekImgs(weekOff).slice(0, 6) };   // 草稿：整周菜谱照片（多张，异步压缩，保存时统一落盘）
   const rowsHtml = [1,2,3,4,5,6,7].map(d=>{
     const r = menuDayRows(d, weekOff);
     menuEditDraft[d] = { lunch:r.lunch, dinner:r.dinner };
@@ -12879,15 +12901,15 @@ function menuEditPopup(off){
       <span class="me-meal"><b>晚餐</b><input class="me-in" data-d="${d}" data-f="dinner" maxlength="60" value="${esc(r.dinner)}" placeholder="如：清蒸鱼+青菜"></span>
     </div>`;
   }).join('');
-  const hasImg = !!menuEditDraft.weekImg;
+  const hasImgs = menuEditDraft.weekImgs.length > 0;
   ov.innerHTML = `
     <div class="modal menu-edit-modal">
       <h3>🍱 编辑${weekName}菜谱</h3>
-      <p class="me-tip">正在编辑「${weekName}」（${weekKeyOf(weekOff)}）。拍一张学校发的一周菜谱表传上来最方便～也可以在下面每天填两个字。</p>
+      <p class="me-tip">正在编辑「${weekName}」（${weekKeyOf(weekOff)}）。拍学校发的一周菜谱表传上来最方便，可一次多选几张～也可以在下面每天填两个字。</p>
       <div class="me-weekimg-row">
-        <button class="me-weekphoto" id="meWeekPhoto" type="button">📷 上传一周菜谱</button>
-        <input type="file" id="meWeekFile" accept="image/*" style="display:none;">
-        <span class="me-thumb${hasImg?'':' hide'}" id="meWeekThumb">${hasImg?`<img src="${menuEditDraft.weekImg}" alt="一周菜谱照片">`:''}<i class="me-thumb-x" id="meWeekThumbX" title="删除照片">✕</i></span>
+        <button class="me-weekphoto" id="meWeekPhoto" type="button">📷 上传一周菜谱${hasImgs?`（已有 ${menuEditDraft.weekImgs.length} 张）`:''}</button>
+        <input type="file" id="meWeekFile" accept="image/*" multiple style="display:none;">
+        <span class="me-thumb-list${hasImgs?'':' hide'}" id="meWeekThumbList"></span>
       </div>
       <div class="me-table">${rowsHtml}</div>
       <div class="modal-actions">
@@ -12899,44 +12921,50 @@ function menuEditPopup(off){
   const close = ()=>{ ov.remove(); menuEditDraft = null; };
   ov.querySelector('#meCancel').onclick = close;
   ov.onclick = (e)=>{ if(e.target===ov) close(); };
-  /* 📷 上传一周菜谱照片：压缩到 900px/0.6（菜单表字要能看清，点开可放大） */
-  const paintWeekThumb = ()=>{
-    const thumb = ov.querySelector('#meWeekThumb');
-    const has = !!(menuEditDraft && menuEditDraft.weekImg);
-    thumb.classList.toggle('hide', !has);
-    if(has){
-      let im = thumb.querySelector('img');
-      if(!im){ im = document.createElement('img'); thumb.insertBefore(im, thumb.firstChild); }
-      im.src = menuEditDraft.weekImg;
-    } else {
-      const im = thumb.querySelector('img'); if(im) im.remove();
-    }
+  /* 缩略图列表：每张带 ✕ 可单独删除 */
+  const paintWeekThumbs = ()=>{
+    const list = ov.querySelector('#meWeekThumbList');
+    const arr = (menuEditDraft && menuEditDraft.weekImgs) || [];
+    list.classList.toggle('hide', !arr.length);
+    list.innerHTML = arr.map((src, i)=>`<span class="me-thumb"><img src="${src}" alt="一周菜谱照片${i+1}"><i class="me-thumb-x" data-wx="${i}" title="删除这张">✕</i></span>`).join('');
+    list.querySelectorAll('[data-wx]').forEach(xb=>{
+      xb.onclick = (e)=>{
+        e.stopPropagation();
+        if(!menuEditDraft) return;
+        menuEditDraft.weekImgs.splice(Number(xb.dataset.wx)||0, 1);
+        paintWeekThumbs();
+        const pb = ov.querySelector('#meWeekPhoto');
+        if(pb) pb.textContent = menuEditDraft.weekImgs.length ? `📷 上传一周菜谱（已有 ${menuEditDraft.weekImgs.length} 张）` : '📷 上传一周菜谱';
+      };
+    });
   };
+  paintWeekThumbs();
+  /* 📷 上传一周菜谱照片（支持一次多选）：压缩到 900px/0.6（菜单表字要能看清，点开可放大），最多 6 张 */
   ov.querySelector('#meWeekPhoto').onclick = ()=> ov.querySelector('#meWeekFile').click();
   ov.querySelector('#meWeekFile').onchange = async ()=>{
     const fin = ov.querySelector('#meWeekFile');
-    if(!fin.files || !fin.files[0]) return;
+    if(!fin.files || !fin.files.length) return;
     const pb = ov.querySelector('#meWeekPhoto');
     const old = pb ? pb.textContent : '';
     if(pb){ pb.disabled = true; pb.textContent = '⏳ 处理中…'; }
-    let dataUrl = '';
-    try { dataUrl = await hwCompressImage(fin.files[0], 900, 0.6); } catch(e){ dataUrl = ''; }
+    const files = Array.from(fin.files);
+    for(const f of files){
+      if(!menuEditDraft) break;
+      if(menuEditDraft.weekImgs.length >= 6){ try{ showToast('最多上传 6 张哦～'); }catch(e){} break; }
+      let dataUrl = '';
+      try { dataUrl = await hwCompressImage(f, 900, 0.6); } catch(e){ dataUrl = ''; }
+      if(dataUrl) menuEditDraft.weekImgs.push(dataUrl);
+    }
     if(pb){ pb.disabled = false; pb.textContent = old; }
-    if(!dataUrl){ try{ showToast('照片读取失败，再试一次吧～'); }catch(e){} return; }
-    if(menuEditDraft) menuEditDraft.weekImg = dataUrl;
-    paintWeekThumb();
+    if(menuEditDraft && menuEditDraft.weekImgs.length) paintWeekThumbs();
     fin.value = '';
-  };
-  /* 缩略图 ✕：删除照片（只改草稿，保存时落盘） */
-  ov.querySelector('#meWeekThumbX').onclick = (e)=>{
-    e.stopPropagation();
-    if(menuEditDraft) menuEditDraft.weekImg = '';
-    paintWeekThumb();
   };
   ov.querySelector('#meOk').onclick = ()=>{
     if(!menu.weeks[weekKeyOf(weekOff)]) menu.weeks[weekKeyOf(weekOff)] = { days:{} };
     const bucket = menu.weeks[weekKeyOf(weekOff)];
-    bucket.img = String((menuEditDraft && menuEditDraft.weekImg) || '');
+    const wImgs = (menuEditDraft && Array.isArray(menuEditDraft.weekImgs)) ? menuEditDraft.weekImgs.filter(x=>x).slice(0, 6) : [];
+    bucket.imgs = wImgs;
+    bucket.img = wImgs[0] || '';   // 旧版本客户端只读 img，保持=第一张
     const days = bucket.days;
     ov.querySelectorAll('.me-in').forEach(inp=>{
       const d = inp.dataset.d, f = inp.dataset.f;
