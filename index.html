@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609193" />
+<meta name="build-version" content="202609194" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1579,6 +1579,10 @@
   .mc-title { font-size:16px; font-weight:800; color:#5c3550; }
   .mc-edit { border:none; background:linear-gradient(160deg,var(--accent,#e75480),var(--accent-d,#ff6fa5)); color:#fff; font-size:13px; font-weight:800; padding:6px 14px; border-radius:999px; cursor:pointer; box-shadow:0 3px 10px rgba(231,84,128,.28); }
   .mc-edit:active { transform:scale(.96); }
+  .mc-head-r { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .mc-week-sw { display:inline-flex; background:#f3edf5; border-radius:999px; padding:2px; }
+  .mc-wk { border:none; background:transparent; color:#9a8a96; font-size:12px; font-weight:800; padding:4px 12px; border-radius:999px; cursor:pointer; }
+  .mc-wk.on { background:var(--accent,#e75480); color:#fff; box-shadow:0 2px 6px rgba(231,84,128,.3); }
   .mc-table { display:flex; flex-direction:column; gap:6px; }
   .mc-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:12px; background:#faf7fb; border:1.5px solid transparent; }
   .mc-row .mc-day { flex:0 0 58px; font-size:13px; font-weight:800; color:#7a3a5a; }
@@ -12654,34 +12658,73 @@ function renderTimetable(){
 }
 
 /* ============ 本周菜谱（家长端可编辑 / 首页底部展示，跨设备同步） ============
-   数据：menu = { days: { '1'..'7': { lunch:'', dinner:'', lunchImg:'', dinnerImg:'' } } }
+   数据：menu = { weeks: { 'YYYY-Wnn': { days: { '1'..'7': { lunch,dinner,lunchImg,dinnerImg } } } } }
+   · 按 ISO 周分桶：卡片可切换「本周 / 下周」，家长可提前排下周菜谱
    · 每天可填午餐 / 晚餐两行文字 + 各一张照片（压缩 dataURL，随菜单同步，孩子端可点开看大图）
-   · 冲突收敛与课程表一致：menuTs 时间戳较大者胜（最后编辑者赢）；只有家长端会编辑，孩子端只读 */
+   · 冲突收敛与课程表一致：menuTs 时间戳较大者胜（最后编辑者赢）；只有家长端会编辑，孩子端只读
+   · 旧版单周数据 {days:...} 自动迁移进本周桶（本周桶为空才迁入） */
 const MENU_KEY = 'kidtask_menu_v1';
 const MENU_TS_KEY = 'kidtask_menuts';
+/* 周键：ISO 周（周一起算），如 '2026-W42' */
+function isoWeekKey(dt){
+  try{
+    const d = new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+    const wd = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - wd);
+    const ys = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const wk = Math.ceil((((d - ys) / 86400000) + 1) / 7);
+    return d.getUTCFullYear() + '-W' + String(wk).padStart(2, '0');
+  }catch(e){ return '1970-W01'; }
+}
+function weekKeyOf(off){ const dt = new Date(); dt.setDate(dt.getDate() + (Number(off)||0) * 7); return isoWeekKey(dt); }
+function normalizeMenuDays(src){
+  const days = {};
+  for(let d=1; d<=7; d++){
+    const row = (src && typeof src === 'object' ? src[String(d)] : null) || {};
+    days[String(d)] = {
+      lunch: String(row.lunch || '').slice(0, 60),
+      dinner: String(row.dinner || '').slice(0, 60),
+      lunchImg: String(row.lunchImg || '').slice(0, 400000),
+      dinnerImg: String(row.dinnerImg || '').slice(0, 400000)
+    };
+  }
+  return days;
+}
+function menuDaysHasContent(days){
+  return [1,2,3,4,5,6,7].some(d=>{ const r = (days||{})[String(d)]||{}; return !!(r.lunch || r.dinner || r.lunchImg || r.dinnerImg); });
+}
 function normalizeMenu(o){
   try{
     o = o || {};
-    const src = (o.days && typeof o.days === 'object') ? o.days : {};
-    const days = {};
-    for(let d=1; d<=7; d++){
-      const row = src[String(d)] || {};
-      days[String(d)] = {
-        lunch: String(row.lunch || '').slice(0, 60),
-        dinner: String(row.dinner || '').slice(0, 60),
-        lunchImg: String(row.lunchImg || '').slice(0, 400000),
-        dinnerImg: String(row.dinnerImg || '').slice(0, 400000)
-      };
+    const weeks = {};
+    const src = (o.weeks && typeof o.weeks === 'object') ? o.weeks : {};
+    Object.keys(src).forEach(k=>{
+      if(!/^\d{4}-W\d{1,2}$/.test(String(k))) return;
+      weeks[k] = { days: normalizeMenuDays(src[k] && src[k].days) };
+    });
+    if(o.days && typeof o.days === 'object'){   // 旧版单周数据：归入本周桶（本周桶为空才迁入）
+      const wk = weekKeyOf(0);
+      if(!menuDaysHasContent((weeks[wk]||{}).days)) weeks[wk] = { days: normalizeMenuDays(o.days) };
     }
-    return { days };
-  }catch(e){ return { days:{} }; }
+    return { weeks };
+  }catch(e){ return { weeks:{} }; }
 }
 function loadMenu(){
-  try{ return normalizeMenu(JSON.parse(localStorage.getItem(MENU_KEY))); }
-  catch(e){ return normalizeMenu(null); }
+  let m;
+  try{ m = normalizeMenu(JSON.parse(localStorage.getItem(MENU_KEY))); }
+  catch(e){ m = normalizeMenu(null); }
+  /* 静默落盘：把规范化/迁移后的形状写回（绝不 touch menuTs、不 pushSync——
+     「被动初始化」不参与 last-writer-wins 裁决，避免重蹈课表 ttTs 误抬的覆辙） */
+  try{
+    const raw = localStorage.getItem(MENU_KEY);
+    if(JSON.stringify(m) !== JSON.stringify(JSON.parse(raw) || {})) localStorage.setItem(MENU_KEY, JSON.stringify(m));
+  }catch(e){}
+  return m;
 }
 let menu = loadMenu();
 let menuTs = Number(localStorage.getItem(MENU_TS_KEY)) || 0;
+/* 卡片当前查看的周：0=本周 1=下周（仅展示态，不落盘、不同步） */
+let menuViewWeek = 0;
 function touchMenuTs(){
   menuTs = Math.max(menuTs + 1, Date.now());
   try{ localStorage.setItem(MENU_TS_KEY, String(menuTs)); }catch(e){}
@@ -12691,18 +12734,26 @@ function saveMenu(){
   menu = normalizeMenu(menu);
   try{ localStorage.setItem(MENU_KEY, JSON.stringify(menu)); }catch(e){}
   touchMenuTs();
+  try{ if(document.getElementById('homeMenuCard')) refreshMenuCard(); }catch(e){}   // 卡片已在页面上则原位刷新（编辑弹窗保存路径无需整页 render）
   try{ pushSync(); }catch(e){}
 }
-function menuHasContent(){
-  return [1,2,3,4,5,6,7].some(d=>{ const r = (menu.days||{})[String(d)]||{}; return !!(r.lunch || r.dinner || r.lunchImg || r.dinnerImg); });
+function menuWeekDays(off){
+  const wk = ((menu.weeks||{})[weekKeyOf(off)]);
+  return (wk && wk.days) || null;
 }
-function menuDayRows(d){
-  const r = ((menu.days||{})[String(d)]) || {};
+function menuHasContent(off){
+  return menuDaysHasContent(menuWeekDays(off==null ? menuViewWeek : off) || {});
+}
+function menuDayRows(d, off){
+  const days = menuWeekDays(off==null ? menuViewWeek : off) || {};
+  const r = days[String(d)] || {};
   return { lunch:r.lunch||'', dinner:r.dinner||'', lunchImg:r.lunchImg||'', dinnerImg:r.dinnerImg||'' };
 }
-/* 首页底部「🍱 本周菜谱」卡片：今天高亮；每餐可带缩略图（点开看大图）；家长端带「✏️ 编辑」入口，孩子端只读 */
-function menuCardHtml(wd){
+/* 首页底部「🍱 菜谱」卡片：本周/下周可切换；本周的今天高亮；每餐可带缩略图（点开看大图）；家长端带「✏️ 编辑」入口 */
+function menuCardHtml(wd, off){
   const canEdit = deviceRole !== 'child';
+  const weekOff = (off==null ? menuViewWeek : Number(off)||0);
+  const weekName = weekOff === 1 ? '下周' : '本周';
   const mealCell = (r, d, f, label)=>{
     const img = r[f + 'Img'] || '';
     const txt = r[f] || '';
@@ -12711,8 +12762,8 @@ function menuCardHtml(wd){
     return `<span class="mc-meal"><b>${label}</b>${imgHtml}${body}</span>`;
   };
   const rows = [1,2,3,4,5,6,7].map(d=>{
-    const r = menuDayRows(d);
-    const isToday = d === wd;
+    const r = menuDayRows(d, weekOff);
+    const isToday = weekOff === 0 && d === wd;
     return `<div class="mc-row${isToday?' today':''}">
       <span class="mc-day">${TT_DN[d]}${isToday?'<i class="mc-flag">今天</i>':''}</span>
       ${mealCell(r, d, 'lunch', '午餐')}
@@ -12721,11 +12772,19 @@ function menuCardHtml(wd){
   }).join('');
   return `
     <div class="mc-head">
-      <span class="mc-title">🍱 本周菜谱</span>
-      ${canEdit ? '<button class="mc-edit" id="menuEditBtn" type="button">✏️ 编辑</button>' : ''}
+      <span class="mc-title">🍱 ${weekName}菜谱</span>
+      <span class="mc-head-r">
+        <span class="mc-week-sw">
+          <button class="mc-wk${weekOff===0?' on':''}" data-mw="0" type="button">本周</button>
+          <button class="mc-wk${weekOff===1?' on':''}" data-mw="1" type="button">下周</button>
+        </span>
+        ${canEdit ? '<button class="mc-edit" id="menuEditBtn" type="button">✏️ 编辑</button>' : ''}
+      </span>
     </div>
-    ${menuHasContent() ? `<div class="mc-table">${rows}</div>`
-      : `<div class="mc-empty">${canEdit ? '本周菜谱还没发布哦～点「✏️ 编辑」写上这一周吃什么吧！' : '本周菜谱还没有发布哦～请爸爸妈妈在家长端发布吧！'}</div>`}`;
+    ${menuHasContent(weekOff) ? `<div class="mc-table">${rows}</div>`
+      : `<div class="mc-empty">${canEdit
+          ? (weekOff===1 ? '下周菜谱还没排哦～点「✏️ 编辑」提前安排起来吧！' : '本周菜谱还没发布哦～点「✏️ 编辑」写上这一周吃什么吧！')
+          : (weekOff===1 ? '下周菜谱还没有排哦～请爸爸妈妈提前安排吧！' : '本周菜谱还没有发布哦～请爸爸妈妈在家长端发布吧！')}</div>`}`;
 }
 /* 菜谱大图查看器：点击缩略图全屏预览 */
 function menuImgView(src, title){
@@ -12745,16 +12804,9 @@ function menuImgView(src, title){
   const h = ov.querySelector('h3');
   if(h) h.onclick = (e)=>{ e.stopPropagation(); };
 }
-function mountMenuCard(){
-  const now = new Date();
-  const wd = now.getDay() === 0 ? 7 : now.getDay();
-  const card = document.createElement('div');
-  card.className = 'menu-card';
-  card.id = 'homeMenuCard';
-  card.innerHTML = menuCardHtml(wd);
-  main.appendChild(card);
+function bindMenuCard(card){
   const btn = card.querySelector('#menuEditBtn');
-  if(btn) btn.onclick = ()=> menuEditPopup();
+  if(btn) btn.onclick = ()=> menuEditPopup(menuViewWeek);
   card.querySelectorAll('.mc-img').forEach(im=>{
     im.onclick = ()=>{
       const row = im.closest('.mc-row');
@@ -12762,17 +12814,46 @@ function mountMenuCard(){
       menuImgView(im.getAttribute('src'), dayName + (im.dataset.mf === 'lunch' ? ' 午餐' : ' 晚餐'));
     };
   });
+  card.querySelectorAll('.mc-wk').forEach(b=>{
+    b.onclick = ()=>{
+      const off = Number(b.dataset.mw)||0;
+      if(off === menuViewWeek) return;
+      menuViewWeek = off;
+      refreshMenuCard();
+    };
+  });
+}
+function refreshMenuCard(){
+  const card = document.getElementById('homeMenuCard');
+  if(!card) return;
+  const now = new Date();
+  const wd = now.getDay() === 0 ? 7 : now.getDay();
+  card.innerHTML = menuCardHtml(wd, menuViewWeek);
+  bindMenuCard(card);
   return card;
 }
-/* 家长端编辑弹窗：一周 7 天 × 午餐/晚餐（文字 + 📷 照片），保存即同步。
+function mountMenuCard(){
+  const now = new Date();
+  const wd = now.getDay() === 0 ? 7 : now.getDay();
+  const card = document.createElement('div');
+  card.className = 'menu-card';
+  card.id = 'homeMenuCard';
+  card.innerHTML = menuCardHtml(wd, menuViewWeek);
+  main.appendChild(card);
+  bindMenuCard(card);
+  return card;
+}
+/* 家长端编辑弹窗：一周 7 天 × 午餐/晚餐（文字 + 📷 照片），可切本周/下周编辑，保存即同步。
    草稿 menuEditDraft 挂在模块级：照片压缩是异步的，先存草稿再统一落盘。 */
 let menuEditDraft = null;
-function menuEditPopup(){
+function menuEditPopup(off){
+  const weekOff = (off==null ? menuViewWeek : Number(off)||0);
+  const weekName = weekOff === 1 ? '下周' : '本周';
   const ov = document.createElement('div');
   ov.className = 'overlay';
   menuEditDraft = {};
   const rowsHtml = [1,2,3,4,5,6,7].map(d=>{
-    const r = menuDayRows(d);
+    const r = menuDayRows(d, weekOff);
     menuEditDraft[d] = { lunch:r.lunch, dinner:r.dinner, lunchImg:r.lunchImg, dinnerImg:r.dinnerImg };
     const mealCell = (f, label, ph)=>{
       const img = r[f + 'Img'] || '';
@@ -12790,8 +12871,8 @@ function menuEditPopup(){
   }).join('');
   ov.innerHTML = `
     <div class="modal menu-edit-modal">
-      <h3>🍱 编辑本周菜谱</h3>
-      <p class="me-tip">填写每天吃什么（可留空），点 📷 可上传那一餐的照片～保存后会自动同步到家里的其他设备。</p>
+      <h3>🍱 编辑${weekName}菜谱</h3>
+      <p class="me-tip">正在编辑「${weekName}」（${weekKeyOf(weekOff)}）。填写每天吃什么（可留空），点 📷 可上传那一餐的照片～保存后会自动同步到家里的其他设备。</p>
       <div class="me-table">${rowsHtml}</div>
       <div class="modal-actions">
         <button class="btn cancel" id="meCancel">取消</button>
@@ -12840,14 +12921,16 @@ function menuEditPopup(){
     };
   });
   ov.querySelector('#meOk').onclick = ()=>{
+    if(!menu.weeks[weekKeyOf(weekOff)]) menu.weeks[weekKeyOf(weekOff)] = { days:{} };
+    const days = menu.weeks[weekKeyOf(weekOff)].days;
     ov.querySelectorAll('.me-in').forEach(inp=>{
       const d = inp.dataset.d, f = inp.dataset.f;
-      if(!menu.days[d]) menu.days[d] = {};
-      menu.days[d][f] = String(inp.value || '').trim().slice(0, 60);
-      if(menuEditDraft && menuEditDraft[d]) menu.days[d][f + 'Img'] = String(menuEditDraft[d][f + 'Img'] || '');
+      if(!days[d]) days[d] = {};
+      days[d][f] = String(inp.value || '').trim().slice(0, 60);
+      if(menuEditDraft && menuEditDraft[d]) days[d][f + 'Img'] = String(menuEditDraft[d][f + 'Img'] || '');
     });
     saveMenu(); close(); render();
-    try{ showToast('🍱 本周菜谱已保存并同步'); }catch(e){}
+    try{ showToast('🍱 ' + weekName + '菜谱已保存并同步'); }catch(e){}
   };
 }
 
