@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609191" />
+<meta name="build-version" content="202609192" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1573,6 +1573,31 @@
   .tt-cell.cur { background:linear-gradient(135deg,#fff3d6,#ffe6ef); border-color:var(--accent); box-shadow:0 2px 8px rgba(231,84,128,.18); }
   tr.now-row .tt-period { border-color:var(--accent); }
   .tt-ops { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 6px; }
+  /* ===== 本周菜谱（首页底部卡片 + 家长端编辑弹窗） ===== */
+  .menu-card { background:var(--card,#fff); border:1px solid var(--accent-soft,#e3e9f2); border-radius:16px; padding:14px 16px; margin-top:14px; box-shadow:0 4px 14px rgba(0,0,0,.05); }
+  .mc-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+  .mc-title { font-size:16px; font-weight:800; color:#5c3550; }
+  .mc-edit { border:none; background:linear-gradient(160deg,var(--accent,#e75480),var(--accent-d,#ff6fa5)); color:#fff; font-size:13px; font-weight:800; padding:6px 14px; border-radius:999px; cursor:pointer; box-shadow:0 3px 10px rgba(231,84,128,.28); }
+  .mc-edit:active { transform:scale(.96); }
+  .mc-table { display:flex; flex-direction:column; gap:6px; }
+  .mc-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:12px; background:#faf7fb; border:1.5px solid transparent; }
+  .mc-row .mc-day { flex:0 0 58px; font-size:13px; font-weight:800; color:#7a3a5a; }
+  .mc-row .mc-meal { flex:1; min-width:0; font-size:13px; color:#5c3550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mc-row .mc-meal b { display:inline-block; margin-right:6px; font-size:11px; font-weight:800; color:var(--accent,#e75480); background:var(--accent-soft,#fdeef4); border-radius:8px; padding:1px 7px; }
+  .mc-row .mc-meal em { color:#c3bcc6; font-style:normal; }
+  .mc-row.today { background:linear-gradient(135deg,var(--accent-soft,#fdeef4),#fff); border-color:var(--accent,#e75480); }
+  .mc-row.today .mc-day { color:var(--accent,#e75480); }
+  .mc-flag { display:inline-block; margin-left:4px; font-size:10px; font-style:normal; font-weight:800; color:#fff; background:var(--accent,#e75480); border-radius:8px; padding:1px 6px; vertical-align:1px; }
+  .mc-empty { font-size:13px; font-weight:700; color:#9a8a96; text-align:center; padding:10px 0 4px; line-height:1.7; }
+  .menu-edit-modal { max-width:520px; width:min(92vw,520px); max-height:84vh; overflow-y:auto; }
+  .me-tip { font-size:12px; color:#9a8a96; margin:4px 0 10px; font-weight:600; }
+  .me-table { display:flex; flex-direction:column; gap:8px; }
+  .me-row { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:12px; background:#faf7fb; }
+  .me-row .me-day { flex:0 0 44px; font-size:13px; font-weight:800; color:#7a3a5a; }
+  .me-row .me-meal { flex:1; display:flex; align-items:center; gap:6px; min-width:0; }
+  .me-row .me-meal b { flex:0 0 auto; font-size:11px; font-weight:800; color:var(--accent,#e75480); background:var(--accent-soft,#fdeef4); border-radius:8px; padding:2px 7px; }
+  .me-row .me-in { flex:1; min-width:0; border:1.5px solid var(--accent-soft,#e3e9f2); border-radius:10px; padding:6px 8px; font-size:13px; font-family:inherit; }
+  .me-row .me-in:focus { outline:none; border-color:var(--accent,#e75480); }
   .tt-ops .btn { font-size:13px; padding:7px 12px; }
   .tt-tip { font-size:12px; color:#9a8a96; margin-top:4px; line-height:1.6; }
   .badge { background:#fff; border:2px solid var(--accent-soft); border-radius:14px; padding:14px 8px; text-align:center; transition:.15s; }
@@ -4421,6 +4446,9 @@ function renderHome(){
   hwCard.style.cssText = 'background:var(--card,#fff);border:1px solid var(--accent-soft,#e3e9f2);border-radius:16px;padding:14px 16px;margin-top:14px;box-shadow:0 4px 14px rgba(0,0,0,.05);';
   hwCard.innerHTML = homeworkCurveHtml();
   main.appendChild(hwCard);
+
+  // 首页最底部：🍱 本周菜谱（家长端可编辑，孩子端只读，随同步通道跨设备更新）
+  try { mountMenuCard(); } catch(e){ console.error('[menu] 首页菜谱渲染异常', e); }
 
   refreshSyncUI();
 }
@@ -12610,10 +12638,123 @@ function renderTimetable(){
   };
 }
 
+/* ============ 本周菜谱（家长端可编辑 / 首页底部展示，跨设备同步） ============
+   数据：menu = { days: { '1'..'7': { lunch:'', dinner:'' } } }
+   · 每天可填午餐 / 晚餐两行内容（字符串，留空=没定）
+   · 冲突收敛与课程表一致：menuTs 时间戳较大者胜（最后编辑者赢）；只有家长端会编辑，孩子端只读 */
+const MENU_KEY = 'kidtask_menu_v1';
+const MENU_TS_KEY = 'kidtask_menuts';
+function normalizeMenu(o){
+  try{
+    o = o || {};
+    const src = (o.days && typeof o.days === 'object') ? o.days : {};
+    const days = {};
+    for(let d=1; d<=7; d++){
+      const row = src[String(d)] || {};
+      days[String(d)] = {
+        lunch: String(row.lunch || '').slice(0, 60),
+        dinner: String(row.dinner || '').slice(0, 60)
+      };
+    }
+    return { days };
+  }catch(e){ return { days:{} }; }
+}
+function loadMenu(){
+  try{ return normalizeMenu(JSON.parse(localStorage.getItem(MENU_KEY))); }
+  catch(e){ return normalizeMenu(null); }
+}
+let menu = loadMenu();
+let menuTs = Number(localStorage.getItem(MENU_TS_KEY)) || 0;
+function touchMenuTs(){
+  menuTs = Math.max(menuTs + 1, Date.now());
+  try{ localStorage.setItem(MENU_TS_KEY, String(menuTs)); }catch(e){}
+  try{ logicalTs = Math.max(logicalTs, menuTs); localStorage.setItem('kidtask_sync_ts', String(logicalTs)); }catch(e){}
+}
+function saveMenu(){
+  menu = normalizeMenu(menu);
+  try{ localStorage.setItem(MENU_KEY, JSON.stringify(menu)); }catch(e){}
+  touchMenuTs();
+  try{ pushSync(); }catch(e){}
+}
+function menuHasContent(){
+  return [1,2,3,4,5,6,7].some(d=>{ const r = (menu.days||{})[String(d)]||{}; return !!(r.lunch || r.dinner); });
+}
+function menuDayRows(d){
+  const r = ((menu.days||{})[String(d)]) || {};
+  return { lunch:r.lunch||'', dinner:r.dinner||'' };
+}
+/* 首页底部「🍱 本周菜谱」卡片：今天高亮；家长端带「✏️ 编辑」入口，孩子端只读 */
+function menuCardHtml(wd){
+  const canEdit = deviceRole !== 'child';
+  const rows = [1,2,3,4,5,6,7].map(d=>{
+    const r = menuDayRows(d);
+    const isToday = d === wd;
+    return `<div class="mc-row${isToday?' today':''}">
+      <span class="mc-day">${TT_DN[d]}${isToday?'<i class="mc-flag">今天</i>':''}</span>
+      <span class="mc-meal"><b>午餐</b>${r.lunch ? esc(r.lunch) : '<em>—</em>'}</span>
+      <span class="mc-meal"><b>晚餐</b>${r.dinner ? esc(r.dinner) : '<em>—</em>'}</span>
+    </div>`;
+  }).join('');
+  return `
+    <div class="mc-head">
+      <span class="mc-title">🍱 本周菜谱</span>
+      ${canEdit ? '<button class="mc-edit" id="menuEditBtn" type="button">✏️ 编辑</button>' : ''}
+    </div>
+    ${menuHasContent() ? `<div class="mc-table">${rows}</div>`
+      : `<div class="mc-empty">${canEdit ? '本周菜谱还没发布哦～点「✏️ 编辑」写上这一周吃什么吧！' : '本周菜谱还没有发布哦～请爸爸妈妈在家长端发布吧！'}</div>`}`;
+}
+function mountMenuCard(){
+  const now = new Date();
+  const wd = now.getDay() === 0 ? 7 : now.getDay();
+  const card = document.createElement('div');
+  card.className = 'menu-card';
+  card.id = 'homeMenuCard';
+  card.innerHTML = menuCardHtml(wd);
+  main.appendChild(card);
+  const btn = card.querySelector('#menuEditBtn');
+  if(btn) btn.onclick = ()=> menuEditPopup();
+  return card;
+}
+/* 家长端编辑弹窗：一周 7 天 × 午餐/晚餐，保存即同步 */
+function menuEditPopup(){
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  const rowsHtml = [1,2,3,4,5,6,7].map(d=>{
+    const r = menuDayRows(d);
+    return `<div class="me-row">
+      <span class="me-day">${TT_DN[d]}</span>
+      <span class="me-meal"><b>午餐</b><input class="me-in" data-d="${d}" data-f="lunch" maxlength="60" value="${esc(r.lunch)}" placeholder="如：番茄炒蛋"></span>
+      <span class="me-meal"><b>晚餐</b><input class="me-in" data-d="${d}" data-f="dinner" maxlength="60" value="${esc(r.dinner)}" placeholder="如：清蒸鱼+青菜"></span>
+    </div>`;
+  }).join('');
+  ov.innerHTML = `
+    <div class="modal menu-edit-modal">
+      <h3>🍱 编辑本周菜谱</h3>
+      <p class="me-tip">填写周一到周日每天吃什么，留空表示没定～保存后会自动同步到家里的其他设备。</p>
+      <div class="me-table">${rowsHtml}</div>
+      <div class="modal-actions">
+        <button class="btn cancel" id="meCancel">取消</button>
+        <button class="btn primary" id="meOk">保存</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  const close = ()=> ov.remove();
+  ov.querySelector('#meCancel').onclick = close;
+  ov.onclick = (e)=>{ if(e.target===ov) close(); };
+  ov.querySelector('#meOk').onclick = ()=>{
+    ov.querySelectorAll('.me-in').forEach(inp=>{
+      const d = inp.dataset.d, f = inp.dataset.f;
+      if(!menu.days[d]) menu.days[d] = { lunch:'', dinner:'' };
+      menu.days[d][f] = String(inp.value || '').trim().slice(0, 60);
+    });
+    saveMenu(); close(); render();
+    try{ showToast('🍱 本周菜谱已保存并同步'); }catch(e){}
+  };
+}
+
 function renderRewards(){
   const bal = pointBalance();
-  const canManage = isParentDevice();   // 仅家长端显示「添加奖励 / 删除奖励」入口（点击时仍需验证家长密码）
-  const pendingIds = redeemed.filter(r=>r.status==='pending').map(r=>r.rewardId);
+  const canManage = isParentDevice();   // 仅家长端显示「添加奖励 / 删除奖励」入口（点击时仍需验证家长密码）  const pendingIds = redeemed.filter(r=>r.status==='pending').map(r=>r.rewardId);
   const rw = rewardDefs.map(r=>{
     const can = bal >= r.cost;
     const lack = r.cost - bal;
@@ -14521,6 +14662,8 @@ function collectSyncState(){
     timetable, ttTs,
     /* 校内作业（家长布置，按日期分桶）：与课程表一样按 hwTs 取较新收敛 */
     hw, hwTs,
+    /* 本周菜谱（家长编辑，孩子端只读）：与课程表一样按 menuTs 取较新收敛 */
+    menu, menuTs,
     /* 摇骰子区间设置：家长配置，按 diceCfgTs 取较新收敛（最后编辑者赢） */
     diceCfg, diceCfgTs,
     knowledgeType,
@@ -14721,9 +14864,18 @@ function applySyncState(obj){
         if(_hwt > hwTs){ hwTs = _hwt; try{ localStorage.setItem(HW_TS_KEY, String(hwTs)); }catch(e){} }
       }
     }
+    /* 本周菜谱：按 menuTs 取较新收敛（最后编辑者赢），与课程表一致；只有家长端会编辑，孩子端永不回写 */
+    if(obj.menu && typeof obj.menu === 'object'){
+      const _mt = Number(obj.menuTs)||0;
+      if(_mt > menuTs){
+        menu = normalizeMenu(obj.menu);
+        try{ localStorage.setItem(MENU_KEY, JSON.stringify(menu)); }catch(e){}
+        menuTs = _mt; try{ localStorage.setItem(MENU_TS_KEY, String(menuTs)); }catch(e){}
+        if(page === 'home'){ try{ render(); }catch(e){} }
+      }
+    }
     /* 摇骰子区间设置：按 diceCfgTs 取较新收敛（最后编辑者赢），与 timetable/pin 一致 */
-    if(obj.diceCfg && typeof obj.diceCfg === 'object'){
-      const _dt = Number(obj.diceCfgTs)||0;
+    if(obj.diceCfg && typeof obj.diceCfg === 'object'){      const _dt = Number(obj.diceCfgTs)||0;
       if((_dt===0 && diceCfgTs===0) || _dt > diceCfgTs){
         diceCfg = {
           lowMin: Number(obj.diceCfg.lowMin)||0.2, lowMax: Number(obj.diceCfg.lowMax)||0.7,
