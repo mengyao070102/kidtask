@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609195" />
+<meta name="build-version" content="202609196" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -12781,9 +12781,14 @@ function menuCardHtml(wd, off){
       ${mealCell(r, d, 'dinner', '晚餐')}
     </div>`;
   }).join('');
-  /* 整周菜谱照片（如学校发的一周菜单表）：放最上方，点开看大图 */
+  /* 整周菜谱照片（如学校发的一周菜单表）：上传了周图就只显示图片，不再显示周一~周日文字行 */
   const wImg = menuWeekImg(weekOff);
-  const wImgHtml = wImg ? `<div class="mc-weekimg"><img src="${wImg}" data-weekimg="1" alt="${weekName}菜谱照片" title="点击看大图"><span class="mc-weekimg-tip">👆 点图片可放大看</span></div>` : '';
+  const bodyHtml = wImg
+    ? `<div class="mc-weekimg"><img src="${wImg}" data-weekimg="1" alt="${weekName}菜谱照片" title="点击看大图"><span class="mc-weekimg-tip">👆 点图片可放大看</span></div>`
+    : (menuHasContent(weekOff) ? `<div class="mc-table">${rows}</div>`
+      : `<div class="mc-empty">${canEdit
+          ? (weekOff===1 ? '下周菜谱还没排哦～点「✏️ 编辑」提前安排起来吧！' : '本周菜谱还没发布哦～点「✏️ 编辑」写上这一周吃什么吧！')
+          : (weekOff===1 ? '下周菜谱还没有排哦～请爸爸妈妈提前安排吧！' : '本周菜谱还没有发布哦～请爸爸妈妈在家长端发布吧！')}</div>`);
   return `
     <div class="mc-head">
       <span class="mc-title">🍱 ${weekName}菜谱</span>
@@ -12795,10 +12800,7 @@ function menuCardHtml(wd, off){
         ${canEdit ? '<button class="mc-edit" id="menuEditBtn" type="button">✏️ 编辑</button>' : ''}
       </span>
     </div>
-    ${menuHasContent(weekOff) ? `${wImgHtml}<div class="mc-table">${rows}</div>`
-      : `<div class="mc-empty">${canEdit
-          ? (weekOff===1 ? '下周菜谱还没排哦～点「✏️ 编辑」提前安排起来吧！' : '本周菜谱还没发布哦～点「✏️ 编辑」写上这一周吃什么吧！')
-          : (weekOff===1 ? '下周菜谱还没有排哦～请爸爸妈妈提前安排吧！' : '本周菜谱还没有发布哦～请爸爸妈妈在家长端发布吧！')}</div>`}`;
+    ${bodyHtml}`;
 }
 /* 菜谱大图查看器：点击缩略图全屏预览 */
 function menuImgView(src, title){
