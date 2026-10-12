@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609203" />
+<meta name="build-version" content="202609204" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -15349,6 +15349,24 @@ function applySyncState(obj){
    · 切后台/锁屏：Safari 冻结 JS 与定时器，pushSync 的 400ms 防抖可能永远不执行 → pagehide 时立即冲刷待发编辑
    · 回到前台：冻结期间 WebSocket 常被系统杀死且「不派发 close 事件」（僵尸连接），syncConnected 已不可信——
      必须用 mqttClient.connected 实测活性，连接死了就整个重建，否则编辑会发布进死管道静默丢失 */
+/* 接收路径活性探针（r204）：iOS 冻结后系统杀 socket 不派发 close 事件，mqttClient.connected 仍是 true（假在线），
+   r202 的重建只在 connected=false 时触发——「connected=true 的僵尸」成为盲区：requestState 走进死管道静默丢失，
+   其他端发布的数据再也收不到（症状：iOS 端永远停留在旧数据，「其他端的数据未正向同步至 iOS 端」）。
+   修复：回前台/刚连接时发布一条极小的 request 探针；本机订阅了 sync2/#（含控制主题 sync2 本身），
+   探针会经 broker 回环到自己——4 秒内任何消息到达（含自己的回声）= 收发双向通畅，撤探针；
+   超时无任何消息 = 接收路径已死，强制重建连接（带 15 秒冷却防重建风暴）。 */
+let syncProbePending = false;   // 正在等探针回声
+let syncProbeAt = 0;            // 探针发出时刻
+let syncRebuildAt = 0;          // 上次强制重建时刻（冷却窗口）
+function syncForceRebuild(){
+  try{ setSyncStatus('pending', '重连中…'); }catch(e){}
+  syncConnected = false;
+  syncProbePending = false;
+  syncRebuildAt = Date.now();
+  try{ if(mqttClient) mqttClient.end(true); }catch(e){}
+  mqttClient = null;
+  try{ connectSync(); }catch(e){}
+}
 function syncFlushPending(){
   try{
     if(pushTimer && syncConnected && mqttClient && mqttClient.connected && !syncing){
@@ -15362,14 +15380,13 @@ function syncOnVisChange(){
   try{
     if(!mqttClient){ try{ connectSync(); }catch(e){} return; }
     if(!mqttClient.connected){   // 僵尸/断开的连接：mqtt.js 自动重连对半死 socket 不可靠，强制重建
-      try{ setSyncStatus('pending', '重连中…'); }catch(e){}
-      syncConnected = false;
-      try{ mqttClient.end(true); }catch(e){}
-      mqttClient = null;
-      try{ connectSync(); }catch(e){}
+      syncForceRebuild();
       return;
     }
-    requestState(); pushSync(true);   // 连接健在：正常对账补推
+    /* 连接自称健在：发探针实测接收路径（可能 connected=true 但 socket 已被 iOS 静默杀死的假在线）。
+       request 即探针：本机订阅 sync2/# 会收到自己的回声；4 秒无任何消息到达则由看门狗强制重建。 */
+    syncProbePending = true; syncProbeAt = Date.now();
+    requestState(); pushSync(true);   // 正常对账补推
   }catch(e){}
 }
 let syncLifeBound = false;   // connectSync 会被断线重建反复调用，生命周期监听只绑一次（否则指数堆积重复推送）
@@ -15391,10 +15408,12 @@ function connectSync(){
         // 上线即拉取家庭最新状态，并把本机状态发布（retain）给之后加入的设备
         mqttClient.subscribe(syncBase() + '/#', { qos: 0 }, ()=>{ requestState(); pushSync(true); });  // sync/# 匹配 sync(控制) 与 sync/<senderId>(各设备快照)，晚加入者自动拿到全部 retained 快照
         mqttClient.subscribe(evtTopic(), { qos: 0 });   // 落地版方案B：订阅孩子端行为事件流（单向 child→parent）
+        /* 首次连接也可能是死管道（iOS 网络切换后刚恢复）：连接成功即上探针，本机自己的快照/request 回声 4 秒内未到达 → 看门狗强制重建 */
+        syncProbePending = true; syncProbeAt = Date.now();
       });
-      mqttClient.on('message', (topic, payload)=> handleSyncMessage(topic, payload));
+      mqttClient.on('message', (topic, payload)=>{ syncProbePending = false; try{ handleSyncMessage(topic, payload); }catch(e){} });   // 任何消息到达（含自身回声）= 接收路径通畅，撤探针
       mqttClient.on('error', ()=> setSyncStatus('off', '同步出错'));
-      mqttClient.on('close', ()=>{ syncConnected = false; setSyncStatus('off', '同步已断开'); });
+      mqttClient.on('close', ()=>{ syncConnected = false; syncProbePending = false; setSyncStatus('off', '同步已断开'); });
       mqttClient.on('reconnect', ()=>{ setSyncStatus('pending', '同步重连中…'); try { requestState(); pushSync(true); } catch(e){} }); // 重连后主动补齐：拉最新 + 重发本机状态，修复断线期间漏同步
       // 周期对账：切回前台 / 每 3 分钟主动拉取家庭最新状态并补推本机，修复 QoS 偶发丢包导致的漏同步
       // ⚠️ 生命周期监听只绑一次（syncLifeBound）：connectSync 每次断线重建都会执行到这里，重复绑定会让监听器/定时器指数堆积
@@ -15402,6 +15421,15 @@ function connectSync(){
         syncLifeBound = true;
         document.addEventListener('visibilitychange', syncOnVisChange);
         document.addEventListener('pagehide', syncFlushPending);   // iOS 切后台/锁屏前冲刷防抖中的编辑
+        /* 探针看门狗：回前台/刚连接后 4 秒内没有任何消息到达（含自身 request 回声）→ 接收路径已死（iOS 静默杀 socket 的假在线），强制重建；15 秒冷却防重建风暴 */
+        setInterval(()=>{
+          if(!syncProbePending) return;
+          if(!mqttClient || !mqttClient.connected){ syncProbePending = false; return; }
+          if(Date.now() - syncProbeAt > 4000){
+            syncProbePending = false;
+            if(Date.now() - syncRebuildAt > 15000){ try{ syncForceRebuild(); }catch(e){} }
+          }
+        }, 2000);
         setInterval(()=>{ if(syncConnected){ try { requestState(); } catch(e){} } }, 180000);
       }
     } catch(e){ setSyncStatus('off', '同步不可用'); }
