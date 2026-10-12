@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609204" />
+<meta name="build-version" content="202609205" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -925,6 +925,9 @@
   .write-tip .wt-msg { font-size:15px; font-weight:800; color:rgba(255,255,255,.97); line-height:1.55; }
   .write-tip .wt-close { flex:0 0 auto; border:none; background:rgba(255,255,255,.22); color:#fff; font-size:15px; cursor:pointer; padding:3px 7px; border-radius:9px; line-height:1.2; }
   .write-tip .wt-close:hover { background:rgba(255,255,255,.4); }
+  .restore-hint { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:0 0 18px; padding:13px 16px; background:linear-gradient(135deg,#fff8e1,#ffecb3); border:2px dashed #f0a500; color:#7a5200; border-radius:16px; font-size:14px; font-weight:700; line-height:1.55; }
+  .restore-hint .link-btn { color:#b26a00; font-weight:900; background:rgba(240,165,0,.15); border-radius:10px; padding:6px 12px; }
+  .restore-hint .link-btn:active { background:rgba(240,165,0,.32); }
   .bal-banner { display:inline-flex; align-items:center; gap:10px; background:#fff; border:2px solid var(--accent-soft); color:var(--accent); font-size:18px; font-weight:600; padding:10px 20px; border-radius:999px; margin:0 0 16px; box-shadow:var(--sh-pink-sm); }
   .bal-banner b { font-size:26px; color:var(--accent-d); line-height:1; }
   .bal-banner .gem { font-size:22px; }
@@ -4372,6 +4375,14 @@ function renderHome(){
       <div class="wt-text"><b class="wt-label">今日温馨提示</b><span class="wt-msg">${esc(todayWritingTip())}</span></div>
       <button class="wt-close" id="wtClose" type="button" title="今天不再提示">✕</button>
     </div>` : '';
+  /* 数据恢复横幅：本机任务为空 + 已有家庭码 + 尚未与家庭合并过 → 明确告知「数据没丢，正在恢复」，
+     避免 iOS 本地存储被系统清理（Safari 7 天防跟踪/无痕/换浏览器）后用户误以为数据清零 */
+  let restoreHintHtml = '';
+  try {
+    if(!tasks.length && familyCode && !syncFirstApplied){
+      restoreHintHtml = '<div class="restore-hint" id="restoreHint">📥 本机暂无数据，正在从家庭同步恢复…数据在其他设备上是安全的，保持本页打开即可<button class="link-btn" id="restoreRetry">立即重试拉取</button></div>';
+    }
+  } catch(e){}
   main.innerHTML = `
     <div class="home-head">
       <h1 class="page-title">🌸 你好呀，伊伊小公主！</h1>
@@ -4387,6 +4398,7 @@ function renderHome(){
       </div>
     </div>
     <p class="page-sub">今天也要加油完成任务，收集更多积分哦～ 想添加任务请让家长在「家长审核」页操作～</p>
+    ${restoreHintHtml}
     ${writeTipHtml}
     <div class="points-entry">
       <div class="pe-left">⭐ 我的积分</div>
@@ -4497,6 +4509,8 @@ function renderHome(){
   if(gr) gr.onclick = ()=>{ page='rewards'; render(); window.scrollTo(0,0); };
   const wtClose = document.getElementById('wtClose');
   if(wtClose) wtClose.onclick = ()=>{ dismissWriteTip(); const el = document.getElementById('writeTip'); if(el) el.remove(); };
+  const restoreRetry = document.getElementById('restoreRetry');
+  if(restoreRetry) restoreRetry.onclick = ()=>{ try{ requestState(); }catch(e){} try{ pushSync(true); }catch(e){} showToast('已请求家庭最新数据，其他设备在线时约几秒到达'); };
   const ci2 = document.getElementById('checkinBtn'); if(ci2) ci2.onclick = doCheckin;
 
   // 侧栏已移除同步行：同步 + 邀请家人统一放在首页底部（各端一致）
@@ -15145,6 +15159,8 @@ function mergeTask(local, remote){
 /* 把远端状态合并进本地（按任务 id 合并 + 完成态按天「最后操作胜」，避免数据被覆盖） */
 function applySyncState(obj){
   syncing = true;
+  const _tasksBefore = tasks.length;         // 恢复统计：合并前本机任务数（iOS 本地存储被清后从家庭拉回时提示用户）
+  const _firstApply = !syncFirstApplied;     // 是否首次与家庭合并
   try {
     const syncConflicts = [];   // 记录本次被远端较新编辑覆盖的「本端未同步编辑」，用于提示家长
     if(Array.isArray(obj.tasks)){
@@ -15341,6 +15357,10 @@ function applySyncState(obj){
     }
   } catch(e){}
   try { render(); } catch(e){}
+  /* 首次合并且本机原先是空的（iOS 存储被系统清理/换设备）：明确告知数据已从家庭恢复，避免误以为清零 */
+  if(_firstApply && _tasksBefore === 0 && tasks.length > 0){
+    try { showToast('📥 已从家庭同步恢复 ' + tasks.length + ' 项任务和积分数据'); } catch(e){}
+  }
   syncing = false;
   syncFirstApplied = true;   // 标记已完成至少一次与 peer 的合并，之后出现的编辑冲突才提示
 }
@@ -15455,7 +15475,32 @@ try {
     }
   })();
 } catch(e){}
+/* 本机快照自愈（r205）：防止单键损坏/被误清导致任务数据归零。
+   每次离开页面（pagehide）把核心数据快照到独立键 kidtask_snap_v1；
+   启动时若 kidtask_v1 为空但快照有数据 → 自动恢复（iOS 本地存储被整体清空时快照同存亡，
+   那种情况靠家庭同步恢复；此处针对「主键损坏但快照幸存」的场景）。 */
+function saveLocalSnapshot(){
+  try{
+    if(!tasks || !tasks.length) return;
+    localStorage.setItem('kidtask_snap_v1', JSON.stringify({ ts: Date.now(), tasks, extraLog: (extraLog||[]).slice(-500), checkin: checkin || null, badges: earnedBadges || [] }));
+  }catch(e){}
+}
+try { (function restoreFromSnapshot(){
+  if(tasks.length) return;                                   // 本机有任务数据，无需恢复
+  let snap = null; try { snap = JSON.parse(localStorage.getItem('kidtask_snap_v1')); } catch(e){}
+  if(!snap || !Array.isArray(snap.tasks) || !snap.tasks.length) return;
+  tasks = snap.tasks.map(t => Object.assign({ timed:false, timerStartAt:null, elapsed:0, approved:true }, t));
+  deriveAllTasks();
+  try { localStorage.setItem(KEY, JSON.stringify(tasks)); } catch(e){}
+  if(Array.isArray(snap.extraLog) && snap.extraLog.length && !(extraLog||[]).length){ extraLog = snap.extraLog; saveExtraLog(); recomputeExtra(); saveExtra(); }
+  if(snap.checkin && typeof snap.checkin === 'object' && !(checkin && checkin.last)){ checkin = snap.checkin; try { localStorage.setItem(CHECKIN_KEY, JSON.stringify(checkin)); } catch(e){} }
+  if(Array.isArray(snap.badges) && snap.badges.length && !(earnedBadges||[]).length){ earnedBadges = snap.badges; try { localStorage.setItem(BADGE_KEY, JSON.stringify(earnedBadges)); } catch(e){} }
+  render();
+  setTimeout(()=>{ try { showToast('♻️ 检测到本机任务数据异常，已从本机快照恢复 ' + tasks.length + ' 项任务'); } catch(e){} }, 900);
+})(); } catch(e){}
+try { document.addEventListener('pagehide', saveLocalSnapshot); } catch(e){}
 connectSync();
+try { if(!tasks.length && familyCode){ render(); } } catch(e){}   /* 空数据场景：familyCode 就绪后重绘一次，让「正在从家庭恢复」横幅立即可见（首渲染时 familyCode 还是空串） */
 /* 节假日：启动后静默联网刷新「今年」数据（仅当当前正在查看今年时才重渲染，避免打断） */
 (async()=>{ try { const y = new Date().getFullYear(); const m = await fetchHolidays(y); if(m && typeof calYear==='number' && calYear===y) render(); } catch(e){} })();
 /* 侧边栏「服务状态」指示灯：每 15 秒自动探测一次，离线时点击可查看启动方法 */
