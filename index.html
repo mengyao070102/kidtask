@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609205" />
+<meta name="build-version" content="202609206" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13801,14 +13801,18 @@ function mergeHwMaps(localHw, remoteHw){
   const dates = new Set([].concat(Object.keys(localHw || {}), Object.keys(remoteHw || {})));
   dates.forEach(d => {
     const L = localHw && localHw[d], R = remoteHw && remoteHw[d];
-    if(!L){ out[d] = R; return; }
+    if(!L){ out[d] = R; try { repairShedDeep(R, null); } catch(e){} return; }   // 整桶新快路径也要甩图修复（标记置空）
     if(!R){ out[d] = L; return; }
     const dl = Array.from(new Set([].concat(L.dl || [], R.dl || []).filter(Boolean))).slice(0, 60);
     const newer = (Number(R.ts) || 0) > (Number(L.ts) || 0) ? R : L;
     const older = newer === R ? L : R;
     const map = {};
-    (older.items || []).forEach(it => { if(it && it.id) map[it.id] = it; });
+    const oldMap = {};
+    (older.items || []).forEach(it => { if(it && it.id){ map[it.id] = it; oldMap[it.id] = it; } });
     (newer.items || []).forEach(it => { if(it && it.id) map[it.id] = it; });   // newer 同 id 覆盖 older（如完成状态）
+    /* 甩图修复（r205）：较新条目若带 __SYNC_SHED__ 标记（发送端因快照超限省略的图片），
+       从本机旧条目按字段找回真图；找不回则置空（标记绝不落盘，防止渲染出坏图） */
+    for(const k of Object.keys(map)){ try { repairShedDeep(map[k], oldMap[k]); } catch(e){} }
     const items = Object.keys(map).map(k => map[k]).filter(it => it && (it.title || '').trim() && dl.indexOf(it.id) < 0);
     out[d] = { items, ts: Math.max(Number(L.ts) || 0, Number(R.ts) || 0), dl };
   });
@@ -15045,13 +15049,76 @@ function collectSyncState(){
 }
 
 /* 发布本地状态（防抖；force 时立即发送，如回应 request 或刚连接） */
+/* 发布本地状态（防抖；force 时立即发送，如回应 request 或刚连接） */
+
+/* 同步快照体积护栏（r205）：broker.emqx.io 公共服务器单条消息上限约 1MB，超限发布会失败 → 全部同步静默中断。
+   hw 支持每条 9 图、菜谱每周 6 图，照片累计很容易顶爆。策略：
+   · 快照 > 950KB 时，从最大的图片 dataURL 开始替换为 __SYNC_SHED__ 标记（本机原图不动），
+     保证任务/积分/星星/课表等核心数据始终同步；
+   · 接收端 applySyncState/mergeHwMaps 遇到标记时按路径从本机旧数据找回真图，找不回则置空
+     （标记绝不落盘），因此甩图只影响「本次快照没带上图」，不会破坏任何一端的已有图片。 */
+const SYNC_SHED = '__SYNC_SHED__';
+let syncShedWarnedAt = 0;
+function repairShedDeep(remote, local){
+  try{
+    if(Array.isArray(remote)){
+      const L = Array.isArray(local) ? local : [];
+      for(let i = 0; i < remote.length; i++){
+        if(remote[i] === SYNC_SHED){ remote[i] = (typeof L[i] === 'string' && L[i].indexOf('data:image') === 0) ? L[i] : ''; }
+        else if(remote[i] && typeof remote[i] === 'object') repairShedDeep(remote[i], L[i]);
+      }
+      return;
+    }
+    if(remote && typeof remote === 'object'){
+      const L = (local && typeof local === 'object') ? local : {};   // 无本机旧数据时也要走查：标记一律置空，绝不落盘
+      for(const k of Object.keys(remote)){
+        if(remote[k] === SYNC_SHED){ remote[k] = (typeof L[k] === 'string' && L[k].indexOf('data:image') === 0) ? L[k] : ''; }
+        else if(remote[k] && typeof remote[k] === 'object') repairShedDeep(remote[k], L[k]);
+      }
+    }
+  }catch(e){}
+}
+function buildSyncPayload(){
+  const LIMIT = 950 * 1024;
+  const state = collectSyncState();
+  let json = JSON.stringify(state);
+  if(json.length <= LIMIT) return json;
+  try {
+    const refs = [];
+    const walkImgs = (o) => {
+      if(!o || typeof o !== 'object') return;
+      if(Array.isArray(o)){ o.forEach(v => walkImgs(v)); return; }
+      for(const k of Object.keys(o)){
+        const v = o[k];
+        if(typeof v === 'string' && v.indexOf('data:image') === 0) refs.push({ o, k, len: v.length });
+        else if(v && typeof v === 'object') walkImgs(v);
+      }
+    };
+    walkImgs(state);
+    refs.sort((a, b) => b.len - a.len);
+    let shed = 0;
+    for(const r of refs){
+      if(json.length <= LIMIT) break;
+      const orig = r.o[r.k];
+      r.o[r.k] = SYNC_SHED;
+      const nj = JSON.stringify(state);
+      if(nj.length < json.length){ json = nj; shed++; }
+      else { r.o[r.k] = orig; }
+    }
+    if(shed > 0 && Date.now() - syncShedWarnedAt > 3600000){
+      syncShedWarnedAt = Date.now();
+      try { showToast('⚠️ 同步数据过大，本次已省略 ' + shed + ' 张图片传输（本机图片不受影响）'); } catch(e){}
+    }
+  } catch(e){}
+  return json;
+}
 function pushSync(force){
   if(syncing) return;                       // 应用远端中，不回推
   if(!syncConnected || !mqttClient) return; // 未连接则不同步（保持本地）
   const send = ()=>{
     pushTimer = null;
     if(!syncConnected || !mqttClient || !mqttClient.connected || syncing) return;   // mqttClient.connected 实测活性：僵尸连接（iOS 冻结后假在线）不往死管道发
-    try { mqttClient.publish(syncTopic(), JSON.stringify(collectSyncState()), { qos: 1, retain: true }); }   // QoS1：至少一次送达（库在 PUBACK 前自动重传），配合重连补推防 WiFi 抖动丢消息
+    try { mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true }); }   // QoS1：至少一次送达（库在 PUBACK 前自动重传），配合重连补推防 WiFi 抖动丢消息
     catch(e){ setTimeout(()=>{ if(syncConnected) pushSync(true); }, 2000); } // 发布异常则 2 秒后补推
   };
   if(force){ clearTimeout(pushTimer); pushTimer = null; send(); }
@@ -15234,7 +15301,9 @@ function applySyncState(obj){
     if(obj.menu && typeof obj.menu === 'object'){
       const _mt = Number(obj.menuTs)||0;
       if(_mt > menuTs){
+        const _oldMenu = menu;                          // 甩图修复基准：远端快照超限省略的图片从本机旧菜单按路径找回
         menu = normalizeMenu(obj.menu);
+        try { repairShedDeep(menu, _oldMenu); } catch(e){}
         try{ localStorage.setItem(MENU_KEY, JSON.stringify(menu)); }catch(e){}
         menuTs = _mt; try{ localStorage.setItem(MENU_TS_KEY, String(menuTs)); }catch(e){}
         if(page === 'home'){ try{ render(); }catch(e){} }
@@ -15391,7 +15460,7 @@ function syncFlushPending(){
   try{
     if(pushTimer && syncConnected && mqttClient && mqttClient.connected && !syncing){
       clearTimeout(pushTimer); pushTimer = null;
-      mqttClient.publish(syncTopic(), JSON.stringify(collectSyncState()), { qos: 1, retain: true });
+      mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true });
     }
   }catch(e){}
 }
