@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609208" />
+<meta name="build-version" content="202609209" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10247,7 +10247,7 @@ function hwCompressImage(file, maxSide, quality){
 let _imgUpFails = 0, _imgUpOff = false;   // 连续全链失败计数 / 熔断开关
 try { window.addEventListener('online', ()=>{ _imgUpFails = 0; _imgUpOff = false; }); } catch(e){}
 const MEDIA_REPO = 'mengyao070102/kidtask-media';
-let MEDIA_TOKEN = '';   // ⬅ 细粒度 token（仅 kidtask-media、Contents 读写）填这里
+let MEDIA_TOKEN = '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';   // 细粒度 token：仅 kidtask-media、Contents 读写（2026-10-13 配置）
 const IMG_CACHE_KEY = 'kidtask_imgcache_v1';
 function mediaHttpUrl(path){ return 'https://mengyao070102.github.io/kidtask-media/' + path; }
 function cacheLocalImg(url, dataUrl){   // 本机直链→原图缓存： Pages 部署间隙/仓库故障时上传者本机仍能显示
