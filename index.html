@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609207" />
+<meta name="build-version" content="202609208" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10238,13 +10238,65 @@ function hwCompressImage(file, maxSide, quality){
     fr.readAsDataURL(file);
   });
 }
-/* ☁️ 图片云图床上传（r207）：照片压缩后先传图床拿直链，同步快照只传轻量 URL——
-   彻底解除照片对 broker 1MB 单条消息上限的威胁（r206 甩图护栏继续为「上传失败的照片」兜底）。
-   回退链：freeimage.host → smms.app → sm.ms（匿名上传，单张 ≤5MB；任一成功即返回直链）。
-   全部失败返回 ''，调用方保留 data:image 本地存（本机照常显示，同步时按 r206 甩图，行为与 r206 完全一致）。
+/* ☁️ 图片云存储上传（r208）：照片压缩后先传**自家 GitHub 相册仓库** kidtask-media（展示直链走同源
+   mengyao070102.github.io/kidtask-media/——家庭设备访问主应用用的就是 github.io，可达性已被验证）。
+   MEDIA_TOKEN 为细粒度 token（仅限 kidtask-media 仓库 Contents 读写，泄露最多只影响这个相册仓库）；
+   为空时自动跳过 GitHub 跳，走免费图床回退链（freeimage → smms.app → sm.ms）；
+   全部失败返回 ''，调用方保留 data:image 本地存（r206 甩图护栏兜底同步）。
    连续 3 次全链失败自动熔断本次会话（离线设备不再反复等待），断网恢复（online 事件）自动重置。 */
 let _imgUpFails = 0, _imgUpOff = false;   // 连续全链失败计数 / 熔断开关
 try { window.addEventListener('online', ()=>{ _imgUpFails = 0; _imgUpOff = false; }); } catch(e){}
+const MEDIA_REPO = 'mengyao070102/kidtask-media';
+let MEDIA_TOKEN = '';   // ⬅ 细粒度 token（仅 kidtask-media、Contents 读写）填这里
+const IMG_CACHE_KEY = 'kidtask_imgcache_v1';
+function mediaHttpUrl(path){ return 'https://mengyao070102.github.io/kidtask-media/' + path; }
+function cacheLocalImg(url, dataUrl){   // 本机直链→原图缓存： Pages 部署间隙/仓库故障时上传者本机仍能显示
+  try{
+    if(!url || !dataUrl || dataUrl.length > 300000) return;   // 单张 >300KB 不缓存（localStorage 容量有限）
+    const m = JSON.parse(localStorage.getItem(IMG_CACHE_KEY) || '{}');
+    const keys = Object.keys(m); if(keys.length >= 12) delete m[keys[0]];   // 最多 12 张，超出淘汰最旧
+    m[url] = dataUrl;
+    try{ localStorage.setItem(IMG_CACHE_KEY, JSON.stringify(m)); }
+    catch(e){ const k2 = Object.keys(m); k2.slice(0, 6).forEach(k => delete m[k]); try{ localStorage.setItem(IMG_CACHE_KEY, JSON.stringify(m)); }catch(e2){} }
+  }catch(e){}
+}
+function localCachedImg(url){ try{ return JSON.parse(localStorage.getItem(IMG_CACHE_KEY) || '{}')[url] || ''; }catch(e){ return ''; } }
+/* 图片加载失败兜底（文档级捕获委托，接管全部 <img>）：先试本机缓存原图，都不行则半透明占位（不塌版式） */
+try{
+  document.addEventListener('error', (ev)=>{
+    try{
+      const el = ev.target;
+      if(!el || el.tagName !== 'IMG' || el.dataset.ktfb) return;
+      el.dataset.ktfb = '1';
+      const c = localCachedImg(el.getAttribute('src') || '');
+      if(c){ el.src = c; return; }
+      if((el.getAttribute('src') || '').indexOf('data:') !== 0){ el.style.opacity = '.3'; }
+    }catch(e){}
+  }, true);
+}catch(e){}
+function githubUploadImage(dataUrl){
+  return new Promise(resolve=>{
+    try{
+      if(!MEDIA_TOKEN || !dataUrl || dataUrl.indexOf('data:image') !== 0) return resolve('');
+      const ext = dataUrl.slice(5, dataUrl.indexOf(';')).indexOf('png') >= 0 ? 'png' : 'jpg';
+      const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+      const d = new Date();
+      const path = 'img/' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '/kt-' + d.getTime().toString(36) + Math.random().toString(36).slice(2, 6) + '.' + ext;
+      let settled = false;
+      const fin = v => { if(!settled){ settled = true; resolve(v || ''); } };
+      const timer = setTimeout(()=>fin(''), 15000);   // GitHub 跳 15 秒超时
+      try{
+        fetch('https://api.github.com/repos/' + MEDIA_REPO + '/contents/' + path, {
+          method: 'PUT',
+          headers: { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + MEDIA_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'photo ' + d.toISOString().slice(0, 10), content: b64, branch: 'main' })
+        }).then(r => r.json().then(j => ({ status: r.status, j })).catch(() => ({ status: r.status, j: null })))
+          .then(({ status, j }) => { clearTimeout(timer); fin(status === 201 && j && j.content && j.content.path ? mediaHttpUrl(j.content.path) : ''); })
+          .catch(() => { clearTimeout(timer); fin(''); });
+      }catch(e){ clearTimeout(timer); fin(''); }
+    }catch(e){ resolve(''); }
+  });
+}
 function _imgUploadOnce(apiUrl, blob, fieldName, parseFn){
   return new Promise(resolve=>{
     try{
@@ -10265,6 +10317,10 @@ function _imgUploadOnce(apiUrl, blob, fieldName, parseFn){
 async function cloudUploadImage(dataUrl){
   try{
     if(_imgUpOff || !dataUrl || dataUrl.indexOf('data:image') !== 0) return '';
+    /* 第一跳：自家 GitHub 相册仓库（用户指定的首选存储） */
+    const gh = await githubUploadImage(dataUrl);
+    if(gh){ _imgUpFails = 0; cacheLocalImg(gh, dataUrl); return gh; }
+    /* 回退链：免费图床（GitHub token 未配置/失败时仍可用） */
     const bin = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
     const u8 = new Uint8Array(bin.length);
     for(let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
