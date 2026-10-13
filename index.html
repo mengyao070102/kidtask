@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609206" />
+<meta name="build-version" content="202609207" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10238,6 +10238,49 @@ function hwCompressImage(file, maxSide, quality){
     fr.readAsDataURL(file);
   });
 }
+/* ☁️ 图片云图床上传（r207）：照片压缩后先传图床拿直链，同步快照只传轻量 URL——
+   彻底解除照片对 broker 1MB 单条消息上限的威胁（r206 甩图护栏继续为「上传失败的照片」兜底）。
+   回退链：freeimage.host → smms.app → sm.ms（匿名上传，单张 ≤5MB；任一成功即返回直链）。
+   全部失败返回 ''，调用方保留 data:image 本地存（本机照常显示，同步时按 r206 甩图，行为与 r206 完全一致）。
+   连续 3 次全链失败自动熔断本次会话（离线设备不再反复等待），断网恢复（online 事件）自动重置。 */
+let _imgUpFails = 0, _imgUpOff = false;   // 连续全链失败计数 / 熔断开关
+try { window.addEventListener('online', ()=>{ _imgUpFails = 0; _imgUpOff = false; }); } catch(e){}
+function _imgUploadOnce(apiUrl, blob, fieldName, parseFn){
+  return new Promise(resolve=>{
+    try{
+      const fd = new FormData();
+      fd.append(fieldName, blob, 'photo.jpg');
+      let settled = false;
+      const fin = v => { if(!settled){ settled = true; resolve(v || ''); } };
+      const timer = setTimeout(()=>fin(''), 12000);   // 单图床 12 秒超时，快速落到下一家
+      try{
+        fetch(apiUrl, { method:'POST', body: fd })
+          .then(r => r.json())
+          .then(j => { clearTimeout(timer); fin(parseFn(j)); })
+          .catch(() => { clearTimeout(timer); fin(''); });
+      }catch(e){ clearTimeout(timer); fin(''); }
+    }catch(e){ resolve(''); }
+  });
+}
+async function cloudUploadImage(dataUrl){
+  try{
+    if(_imgUpOff || !dataUrl || dataUrl.indexOf('data:image') !== 0) return '';
+    const bin = atob(dataUrl.slice(dataUrl.indexOf(',') + 1));
+    const u8 = new Uint8Array(bin.length);
+    for(let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const blob = new Blob([u8], { type: 'image/jpeg' });
+    if(blob.size > 5 * 1024 * 1024) return '';   // 免费图床单张 5MB 上限；压缩后一般 <300KB，超限直接走本地
+    const smParse = j => { try{ return (j && j.success && j.data && (j.data.url || j.data.display_url)) || ''; }catch(e){ return ''; } };
+    let u = await _imgUploadOnce('https://freeimage.host/api/1/upload?key=6d207e02198a847aa98d0a2a901485a5&format=json', blob, 'source',
+      j => { try{ return (j && j.image && (j.image.url || j.image.display_url)) || ''; }catch(e){ return ''; } });
+    if(!u) u = await _imgUploadOnce('https://smms.app/api/v2/upload', blob, 'smfile', smParse);
+    if(!u) u = await _imgUploadOnce('https://sm.ms/api/v2/upload', blob, 'smfile', smParse);
+    if(u){ _imgUpFails = 0; return u; }
+    _imgUpFails++;
+    if(_imgUpFails >= 3){ _imgUpOff = true; try{ showToast('☁️ 照片上传服务暂不可用，先存本机（换设备后照片不同步）'); }catch(e){} }
+    return '';
+  }catch(e){ return ''; }
+}
 /* 编辑卡「📷 上传图片」入口：压缩 → 视觉模型 → 自动解析任务 → 确认后填入（全局上传按钮/粘贴截图共用） */
 async function hwEditorPhoto(i, file, btn){
   const it = hwEdit && hwEdit.items[i];
@@ -10249,6 +10292,8 @@ async function hwEditorPhoto(i, file, btn){
     it._imgBase = (it._imgSaveArr && it._imgSaveArr.length) ? it._imgSaveArr.length : 0;   // 本次上传前已有张数（取消识别时回滚用）
     it._img = dataUrl;
     try { it._imgSave = await hwCompressImage(file, 900, 0.55); } catch(e) { it._imgSave = dataUrl; }   // 存档版：随作业同步，孩子听写完可查看
+    const _upSave = await cloudUploadImage(it._imgSave);   // ☁️ 存档版传图床拿直链；失败保留本地（r206 甩图兜底）
+    if(_upSave) it._imgSave = _upSave;
     it._imgSaveArr = ((it._imgSaveArr && it._imgSaveArr.length) ? it._imgSaveArr
       : ((it.imgs && it.imgs.length) ? it.imgs.filter(Boolean) : (it.img ? [it.img] : []))
     ).concat([it._imgSave]).slice(0, 9);
@@ -10385,7 +10430,9 @@ async function hwEditorAttach(i, files, btn){
     try {
       const big = await hwCompressImage(arr[k], 1100, 0.72);
       let sv; try { sv = await hwCompressImage(arr[k], 900, 0.55); } catch(e) { sv = big; }
-      saves.push(sv);
+      if(btn) btn.textContent = '☁️ 上传第 ' + (k+1) + '/' + arr.length + ' 张…';
+      const up = await cloudUploadImage(sv);   // 传图床拿直链（同步只传 URL）；失败保留本地 data:image（r206 甩图兜底）
+      saves.push(up || sv);
       if(k === 0 && !it._img) it._img = big;   // 首张兼作编辑卡预览
     } catch(e) { /* 单张失败跳过 */ }
   }
@@ -13072,7 +13119,11 @@ function menuEditPopup(off){
       if(menuEditDraft.weekImgs.length >= 6){ try{ showToast('最多上传 6 张哦～'); }catch(e){} break; }
       let dataUrl = '';
       try { dataUrl = await hwCompressImage(f, 900, 0.6); } catch(e){ dataUrl = ''; }
-      if(dataUrl) menuEditDraft.weekImgs.push(dataUrl);
+      if(dataUrl){
+        if(pb) pb.textContent = '☁️ 上传第 ' + (menuEditDraft.weekImgs.length + 1) + ' 张…';
+        const up = await cloudUploadImage(dataUrl);   // ☁️ 传图床拿直链（同步只传 URL）；失败保留本地（r206 甩图兜底）
+        menuEditDraft.weekImgs.push(up || dataUrl);
+      }
     }
     if(pb){ pb.disabled = false; pb.textContent = old; }
     if(menuEditDraft && menuEditDraft.weekImgs.length) paintWeekThumbs();
