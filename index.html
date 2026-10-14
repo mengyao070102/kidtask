@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609211" />
+<meta name="build-version" content="202609212" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14348,6 +14348,19 @@ function hwPersonaLine(kind){
   const arr = lib[kind] || [];
   return arr.length ? arr[kkRand(arr.length)] : '';
 }
+/* TTS 可用性 + 解锁：iOS Safari 要求第一次 speak() 发生在用户点击手势的调用栈内，
+   否则本次会话所有朗读都静音（平板端「点听写没声音」的主因）；顺带触发部分安卓浏览器音色列表加载 */
+function hwTtsOk(){ return !!(window.speechSynthesis && typeof window.speechSynthesis.speak === 'function'); }
+function hwTtsUnlock(){
+  try{
+    if(!hwTtsOk()) return;
+    const syn = window.speechSynthesis;
+    try{ if(syn.getVoices && !syn.getVoices().length) syn.getVoices(); }catch(e){}
+    const u = new SpeechSynthesisUtterance('.');
+    u.volume = 0; u.lang = 'zh-CN';
+    syn.speak(u);
+  }catch(e){}
+}
 function hwSpeak(text, en){
   try {
     if(!window.speechSynthesis) return;
@@ -14384,10 +14397,20 @@ function hwSpeakTwice(text, en){
       if(hwSpeakTwice._fb){ clearTimeout(hwSpeakTwice._fb); hwSpeakTwice._fb = null; }
       hwSpeakTwice._t2 = setTimeout(()=>{ try{ syn.speak(mk(0.92)); }catch(e){} }, 1500);   // 两遍之间停 1.5 秒，给孩子动笔时间
     };
-    const u1 = mk(1);
-    u1.onend = playSecond;
+    let retried = false;
+    const speakFirst = () => {
+      const u1 = mk(1);
+      u1.onend = playSecond;
+      u1.onerror = ()=>{   // 个别安卓浏览器 cancel+speak 同帧会吞掉语音，报错后自动补一次
+        if(retried){ playSecond(); return; }
+        retried = true;
+        if(hwSpeakTwice._r1) clearTimeout(hwSpeakTwice._r1);
+        hwSpeakTwice._r1 = setTimeout(()=>{ try{ speakFirst(); }catch(e){ playSecond(); } }, 300);
+      };
+      syn.speak(u1);
+    };
     hwSpeakTwice._fb = setTimeout(playSecond, 1200 + String(text).length * 700 + 1600);   // 兜底：个别浏览器 onend 不触发
-    syn.speak(u1);
+    speakFirst();
   } catch(e){}
 }
 /* 听写词表图片 → AI 识别出词表（孩子端自动生成听写词）。要求逐行逐栏全部识别，不设个数截断 */
@@ -14553,6 +14576,7 @@ function hwDictEditWords(iso, itemId, words){
 }
 /* 听写入口路由：有词表直接开始；有词表图片 → AI 自动生成；两者都没有 → 弹上传入口 */
 function openDictation(iso, itemId){
+  hwTtsUnlock();   // 必须在点击手势内同步解锁 TTS，否则 iPad/部分平板整场静音
   const it = hwItems(iso).find(x => x.id === itemId);
   if(!it) return;
   const words = (it.dict && Array.isArray(it.dict.words)) ? it.dict.words.filter(Boolean) : [];
@@ -14563,6 +14587,7 @@ function openDictation(iso, itemId){
 }
 /* 听写弹窗（纸笔模式）：无输入框，只负责读词（每词两遍）+ 翻页，孩子在纸上写；最后出全部词表供核对 */
 function hwDictStart(iso, itemId, words, imgs){
+  hwTtsUnlock();   // 确认弹窗等入口也要在手势内解锁
   const it = hwItems(iso).find(x => x.id === itemId);
   const imgArr = Array.isArray(imgs) ? imgs.filter(Boolean) : (imgs ? [imgs] : []);
   hwDictState = { iso, itemId, title: it ? it.title : '', words, idx: 0, phase: 'play', imgs: imgArr.length ? imgArr : null, img: imgArr.length ? imgArr[0] : null };
@@ -14592,18 +14617,33 @@ function hwDictStart(iso, itemId, words, imgs){
     if(vg) vg.style.background = p==='gentle' ? 'var(--accent-d,#7a5fb0)' : '#c9c2d4';
     if(vm) vm.style.background = p==='muichiro' ? '#5f7f9c' : '#c9c2d4';
   };
-  const play = ()=>{ const w = curWord(); hwSpeakTwice(w, /[a-zA-Z]/.test(w)); };   // 每个词自动播两遍（间隔 1.5 秒）
-  const ask = ()=>{
+  const tts = hwTtsOk();
+  const play = ()=>{ const w = curWord(); if(!tts){ $('hdWord').textContent = '👀 ' + w; return; } hwSpeakTwice(w, /[a-zA-Z]/.test(w)); };   // 每个词自动播两遍（间隔 1.5 秒）；无 TTS 设备看词默写
+  const ask = (sync)=>{
     st.phase = 'play';
     $('hdProg').textContent = `《${st.title||'听写'}》第 ${st.idx+1}/${st.words.length} 个`;
+    if(!tts){   // 设备没有语音引擎：自动降级为「看词默写」
+      $('hdFb').textContent = '📢 此设备不支持语音朗读，已切换为看词默写～';
+      $('hdWord').textContent = '👀 ' + curWord();
+      $('hdNext').textContent = (st.idx + 1 >= st.words.length) ? '🏁 默完了' : '➡️ 下一个';
+      $('hdPlay').textContent = '🙈 遮住再默一遍';
+      return;
+    }
+    $('hdFb').textContent = '✍️ 听仔细，写在纸上哦～';
+    $('hdPlay').textContent = '🔊 再听一遍';
     $('hdWord').textContent = '🎧 听';
     $('hdNext').textContent = (st.idx + 1 >= st.words.length) ? '🏁 听完了' : '➡️ 下一个';
     if(st.idx===0 && !st.__saidStart){   // 开场白只说一次，念完再报第一个词
       st.__saidStart = true;
       const line = hwPersonaLine('start');
-      if(line){ hwSpeak(line, false); setTimeout(play, 1200 + line.length * 260); return; }
+      if(line){
+        if(sync){ hwSpeak(line, false); }   // 首次必须在点击手势调用栈内 speak，否则 iOS 平板静音
+        else { setTimeout(()=>{ try{ hwSpeak(line, false); }catch(e){} }, 350); }
+        setTimeout(play, 1200 + line.length * 260);
+        return;
+      }
     }
-    setTimeout(play, 350);
+    sync ? play() : setTimeout(play, 350);
   };
   const finish = ()=>{
     st.phase = 'done';
@@ -14636,7 +14676,7 @@ function hwDictStart(iso, itemId, words, imgs){
   if(vg) vg.onclick = ()=>{ hwVoiceSet('gentle'); paintVoice(); play(); };
   if(vm) vm.onclick = ()=>{ hwVoiceSet('muichiro'); paintVoice(); play(); };
   paintVoice();
-  ask();
+  ask(true);   // 首词同步播：挂在用户点击手势调用栈内，解锁 iOS/平板 TTS
 }
 
 /* 同步诊断与自救：渲染本机状态、提供强制拉取/重连/复制同家庭链接 */
