@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609212" />
+<meta name="build-version" content="202609213" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14356,6 +14356,7 @@ function hwTtsUnlock(){
     if(!hwTtsOk()) return;
     const syn = window.speechSynthesis;
     try{ if(syn.getVoices && !syn.getVoices().length) syn.getVoices(); }catch(e){}
+    try{ syn.resume(); }catch(e){}   // 安卓 Chrome 后台回来会卡在 paused 状态，不出声
     const u = new SpeechSynthesisUtterance('.');
     u.volume = 0; u.lang = 'zh-CN';
     syn.speak(u);
@@ -14365,6 +14366,7 @@ function hwSpeak(text, en){
   try {
     if(!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
+    try{ window.speechSynthesis.resume(); }catch(e){}
     const u = new SpeechSynthesisUtterance(String(text));
     u.lang = en ? 'en-US' : 'zh-CN';
     const pp = hwPersonaParams();
@@ -14380,6 +14382,7 @@ function hwSpeakTwice(text, en){
     if(!window.speechSynthesis){ hwSpeak(text, en); return; }
     const syn = window.speechSynthesis;
     syn.cancel();
+    try{ syn.resume(); }catch(e){}   // 安卓 Chrome paused 卡死自救
     if(hwSpeakTwice._t2){ clearTimeout(hwSpeakTwice._t2); hwSpeakTwice._t2 = null; }
     if(hwSpeakTwice._fb){ clearTimeout(hwSpeakTwice._fb); hwSpeakTwice._fb = null; }
     const pp = hwPersonaParams();
@@ -14399,7 +14402,9 @@ function hwSpeakTwice(text, en){
     };
     let retried = false;
     const speakFirst = () => {
+      hwSpeakTwice._started = false;   // 供听写弹窗做「引擎死亡检测」
       const u1 = mk(1);
+      u1.onstart = ()=>{ hwSpeakTwice._started = true; };
       u1.onend = playSecond;
       u1.onerror = ()=>{   // 个别安卓浏览器 cancel+speak 同帧会吞掉语音，报错后自动补一次
         if(retried){ playSecond(); return; }
@@ -14618,11 +14623,28 @@ function hwDictStart(iso, itemId, words, imgs){
     if(vm) vm.style.background = p==='muichiro' ? '#5f7f9c' : '#c9c2d4';
   };
   const tts = hwTtsOk();
-  const play = ()=>{ const w = curWord(); if(!tts){ $('hdWord').textContent = '👀 ' + w; return; } hwSpeakTwice(w, /[a-zA-Z]/.test(w)); };   // 每个词自动播两遍（间隔 1.5 秒）；无 TTS 设备看词默写
+  const st2 = hwDictState; st2.dead = false;   // 运行时检测：有 speechSynthesis 但引擎是死的（部分安卓/微信内置浏览器）
+  const useVoice = ()=> tts && !st2.dead;
+  const goSelfRead = ()=>{
+    if(st2.dead) return;
+    if(!document.getElementById('hwDictMask')) return;   // 弹窗已关，看门狗不再触发
+    st2.dead = true;
+    try{ window.speechSynthesis.cancel(); }catch(e){}
+    try{ showToast('📢 未检测到语音引擎，已切换为看词默写'); }catch(e){}
+    ask(true);
+  };
+  const play = ()=>{
+    const w = curWord();
+    if(!useVoice()){ $('hdWord').textContent = '👀 ' + w; return; }
+    hwSpeakTwice._started = false;
+    hwSpeakTwice(w, /[a-zA-Z]/.test(w));   // 每个词自动播两遍（间隔 1.5 秒）
+    if(st2.__watch) clearTimeout(st2.__watch);
+    st2.__watch = setTimeout(()=>{ if(!hwSpeakTwice._started) goSelfRead(); }, 2000);   // 2 秒引擎还没开始说话 → 判死，自动切看词默写
+  };
   const ask = (sync)=>{
     st.phase = 'play';
     $('hdProg').textContent = `《${st.title||'听写'}》第 ${st.idx+1}/${st.words.length} 个`;
-    if(!tts){   // 设备没有语音引擎：自动降级为「看词默写」
+    if(!useVoice()){   // 设备没有语音引擎（或运行时检测已判死）：自动降级为「看词默写」
       $('hdFb').textContent = '📢 此设备不支持语音朗读，已切换为看词默写～';
       $('hdWord').textContent = '👀 ' + curWord();
       $('hdNext').textContent = (st.idx + 1 >= st.words.length) ? '🏁 默完了' : '➡️ 下一个';
@@ -14666,12 +14688,14 @@ function hwDictStart(iso, itemId, words, imgs){
     document.getElementById('hdClose').onclick = ()=>{ mask.remove(); hwDictState = null; render(); };
   };
   const goNext = ()=>{
+    if(st2.__watch){ clearTimeout(st2.__watch); st2.__watch = null; }
     st.idx++;
     st.idx >= st.words.length ? finish() : ask();
   };
+  const closeDict = ()=>{ if(st2.__watch) clearTimeout(st2.__watch); mask.remove(); hwDictState = null; };
   $('hdPlay').onclick = play;
   $('hdNext').onclick = goNext;
-  $('hdQuit').onclick = ()=>{ mask.remove(); hwDictState = null; };
+  $('hdQuit').onclick = closeDict;
   const vg = $('hdVg'), vm = $('hdVm');
   if(vg) vg.onclick = ()=>{ hwVoiceSet('gentle'); paintVoice(); play(); };
   if(vm) vm.onclick = ()=>{ hwVoiceSet('muichiro'); paintVoice(); play(); };
