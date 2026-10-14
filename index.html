@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609215" />
+<meta name="build-version" content="202609216" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14329,10 +14329,10 @@ function hwPickDictVoice(persona, en){
     return fem || pool[0];
   }catch(e){ return null; }
 }
-/* 人设语音参数：温柔女=慢一点+略提音调更暖；无一郎=更慢+明显提音调成清亮少年感 */
+/* 人设语音参数：放慢语速孩子才听得清（读太快后面的字会糊）；无一郎另提音调成清亮少年感 */
 function hwPersonaParams(){
-  if(hwVoiceGet()==='muichiro') return { zhRate:0.78, enRate:0.72, zhPitch:1.35, enPitch:1.15 };
-  return { zhRate:0.8, enRate:0.75, zhPitch:1.1, enPitch:1.0 };
+  if(hwVoiceGet()==='muichiro') return { zhRate:0.68, enRate:0.66, zhPitch:1.35, enPitch:1.15 };
+  return { zhRate:0.68, enRate:0.66, zhPitch:1.1, enPitch:1.0 };
 }
 /* TTS 可用性 + 解锁：iOS Safari 要求第一次 speak() 发生在用户点击手势的调用栈内，
    否则本次会话所有朗读都静音（平板端「点听写没声音」的主因）；顺带触发部分安卓浏览器音色列表加载 */
@@ -14367,35 +14367,37 @@ function hwSpeakDevice(text, en){
 const HW_CLOUD_TTS_MODEL = 'FunAudioLLM/CosyVoice2-0.5B';
 const HW_CLOUD_VOICE = { gentle: 'anna', muichiro: 'alex' };   // 温柔女老师→anna，时透无一郎→清亮少年 alex
 let hwCloudBusy = false;
+let hwCloudDead = false;   // 云端一次失败即拉黑（本次会话不再等它，回退秒切设备引擎）
 let hwCurAudio = null;
 const hwCloudCache = {};
 function hwCloudVoiceId(){ return HW_CLOUD_TTS_MODEL + ':' + (HW_CLOUD_VOICE[hwVoiceGet()] || 'anna'); }
 async function hwCloudTts(text, en){
+  if(hwCloudDead) return null;
   const key = (en ? 'E|' : 'C|') + hwVoiceGet() + '|' + String(text);
   if(hwCloudCache[key]) return hwCloudCache[key];
   const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
   if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return null;
   hwCloudBusy = true;
   const ctrl = ('AbortController' in window) ? new AbortController() : null;
-  const to = ctrl ? setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, 7000) : null;
+  const to = ctrl ? setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, 4500) : null;
   try{
     const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: String(text).slice(0, 120), voice: hwCloudVoiceId(), response_format: 'mp3' }),
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: String(text).slice(0, 120), voice: hwCloudVoiceId(), response_format: 'mp3', speed: 0.8 }),   // 放慢语速，孩子听得清
       signal: ctrl ? ctrl.signal : undefined
     });
     if(to) clearTimeout(to);
     hwCloudBusy = false;
-    if(!res.ok) return null;
+    if(!res.ok){ hwCloudDead = true; return null; }
     const blob = await res.blob();
-    if(!blob || blob.size < 500) return null;   // 太小说明不是有效音频
+    if(!blob || blob.size < 500){ hwCloudDead = true; return null; }   // 太小说明不是有效音频
     const url = URL.createObjectURL(blob);
     hwCloudCache[key] = url;                    // 同词同声音复用，第二次播放零延迟
     const ks = Object.keys(hwCloudCache);
     if(ks.length > 120){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
     return url;
-  }catch(e){ if(to) clearTimeout(to); hwCloudBusy = false; return null; }
+  }catch(e){ if(to) clearTimeout(to); hwCloudBusy = false; hwCloudDead = true; return null; }
 }
 /* 播放云端音频：成功 resolve(true)，被拦截/失败 resolve(false) */
 function hwPlayAudioUrl(url, rate){
@@ -14699,39 +14701,16 @@ function hwDictStart(iso, itemId, words, imgs){
     if(vm) vm.style.background = p==='muichiro' ? '#5f7f9c' : '#c9c2d4';
   };
   const tts = hwTtsOk();
-  const st2 = hwDictState; st2.dead = false;   // 运行时检测：有 speechSynthesis 但引擎是死的（部分安卓/微信内置浏览器）
-  const useVoice = ()=> tts && !st2.dead;
-  const goSelfRead = ()=>{
-    if(st2.dead) return;
-    if(!document.getElementById('hwDictMask')) return;   // 弹窗已关，看门狗不再触发
-    st2.dead = true;
-    try{ window.speechSynthesis.cancel(); }catch(e){}
-    try{ if(hwCurAudio){ hwCurAudio.pause(); hwCurAudio = null; } }catch(e){}
-    try{ showToast('📢 未检测到语音引擎，已切换为看词默写'); }catch(e){}
-    ask(true);
-  };
+  if(!tts){ try{ showToast('📢 此浏览器不支持语音朗读，建议用 Chrome 打开～'); }catch(e){} }
   const play = ()=>{
     const w = curWord();
-    if(!useVoice()){ $('hdWord').textContent = '👀 ' + w; return; }
-    hwSpeakTwice._started = false;
+    if(!tts){ $('hdWord').textContent = '👀 ' + w; return; }
     hwSpeakTwice(w, /[a-zA-Z]/.test(w));   // 云端优先，失败回退设备引擎
-    const armWatch = ()=>{ st2.__watch = setTimeout(()=>{   // 云端合成期间顺延；最终 2s 毫无动静 → 判死，自动切看词默写
-      if(hwCloudBusy){ armWatch(); return; }
-      if(!hwSpeakTwice._started) goSelfRead();
-    }, 2000); };
-    if(st2.__watch) clearTimeout(st2.__watch);
-    armWatch();
   };
   const ask = (sync)=>{
     st.phase = 'play';
     $('hdProg').textContent = `《${st.title||'听写'}》第 ${st.idx+1}/${st.words.length} 个`;
-    if(!useVoice()){   // 设备没有语音引擎（或运行时检测已判死）：自动降级为「看词默写」
-      $('hdFb').textContent = '📢 此设备不支持语音朗读，已切换为看词默写～';
-      $('hdWord').textContent = '👀 ' + curWord();
-      $('hdNext').textContent = (st.idx + 1 >= st.words.length) ? '🏁 默完了' : '➡️ 下一个';
-      $('hdPlay').textContent = '🙈 遮住再默一遍';
-      return;
-    }
+    if(!tts){ $('hdWord').textContent = '👀 ' + curWord(); return; }
     $('hdFb').textContent = '✍️ 听仔细，写在纸上哦～';
     $('hdPlay').textContent = '🔊 再听一遍';
     $('hdWord').textContent = '🎧 听';
@@ -14760,11 +14739,10 @@ function hwDictStart(iso, itemId, words, imgs){
     document.getElementById('hdClose').onclick = ()=>{ mask.remove(); hwDictState = null; render(); };
   };
   const goNext = ()=>{
-    if(st2.__watch){ clearTimeout(st2.__watch); st2.__watch = null; }
     st.idx++;
     st.idx >= st.words.length ? finish() : ask();
   };
-  const closeDict = ()=>{ if(st2.__watch) clearTimeout(st2.__watch); mask.remove(); hwDictState = null; };
+  const closeDict = ()=>{ mask.remove(); hwDictState = null; };
   $('hdPlay').onclick = play;
   $('hdNext').onclick = goNext;
   $('hdQuit').onclick = closeDict;
