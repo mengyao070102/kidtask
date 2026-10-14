@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609213" />
+<meta name="build-version" content="202609214" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14361,8 +14361,9 @@ function hwTtsUnlock(){
     u.volume = 0; u.lang = 'zh-CN';
     syn.speak(u);
   }catch(e){}
+  hwAudioUnlock();   // 同时解锁 <audio>（云端 TTS 用）
 }
-function hwSpeak(text, en){
+function hwSpeakDevice(text, en){
   try {
     if(!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
@@ -14376,15 +14377,96 @@ function hwSpeak(text, en){
     window.speechSynthesis.speak(u);
   } catch(e){}
 }
-/* 听写报词：一个词连播两遍（TTS 队列自动排队，第二遍稍降速更清楚） */
+/* ===== 云端 TTS 优先（不依赖手机语音引擎）：SiliconFlow CosyVoice2，失败自动回退设备引擎 ===== */
+const HW_CLOUD_TTS_MODEL = 'FunAudioLLM/CosyVoice2-0.5B';
+const HW_CLOUD_VOICE = { gentle: 'anna', muichiro: 'alex' };   // 温柔女老师→anna，时透无一郎→清亮少年 alex
+let hwCloudBusy = false;
+let hwCurAudio = null;
+const hwCloudCache = {};
+function hwCloudVoiceId(){ return HW_CLOUD_TTS_MODEL + ':' + (HW_CLOUD_VOICE[hwVoiceGet()] || 'anna'); }
+async function hwCloudTts(text, en){
+  const key = (en ? 'E|' : 'C|') + hwVoiceGet() + '|' + String(text);
+  if(hwCloudCache[key]) return hwCloudCache[key];
+  const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
+  if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return null;
+  hwCloudBusy = true;
+  const ctrl = ('AbortController' in window) ? new AbortController() : null;
+  const to = ctrl ? setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, 7000) : null;
+  try{
+    const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: String(text).slice(0, 120), voice: hwCloudVoiceId(), response_format: 'mp3', speed: (en ? 0.8 : 0.9) }),
+      signal: ctrl ? ctrl.signal : undefined
+    });
+    if(to) clearTimeout(to);
+    hwCloudBusy = false;
+    if(!res.ok) return null;
+    const blob = await res.blob();
+    if(!blob || blob.size < 500) return null;   // 太小说明不是有效音频
+    const url = URL.createObjectURL(blob);
+    hwCloudCache[key] = url;                    // 同词同声音复用，第二次播放零延迟
+    const ks = Object.keys(hwCloudCache);
+    if(ks.length > 120){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
+    return url;
+  }catch(e){ if(to) clearTimeout(to); hwCloudBusy = false; return null; }
+}
+/* 播放云端音频：成功 resolve(true)，被拦截/失败 resolve(false) */
+function hwPlayAudioUrl(url, rate){
+  return new Promise(resolve=>{
+    try{
+      const a = new Audio(url);
+      hwCurAudio = a;
+      a.playbackRate = rate || 1;
+      let done = false;
+      const fin = ok => { if(done) return; done = true; resolve(ok); };
+      a.onended = ()=>fin(true);
+      a.onerror = ()=>fin(false);
+      const p = a.play();
+      if(p && p.catch) p.catch(()=>fin(false));   // 浏览器拦截自动播放 → 走设备引擎回退
+      setTimeout(()=>fin(true), 15000);           // 兜底，防止永不回调
+    }catch(e){ resolve(false); }
+  });
+}
+/* 解锁 <audio>：iOS Safari 需要在点击手势里播放过一次音频，之后才允许程序化播放 */
+function hwAudioUnlock(){
+  try{
+    const a = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
+    a.volume = 0; const p = a.play(); if(p && p.catch) p.catch(()=>{});
+  }catch(e){}
+}
+/* 短句播报（开场白/收尾）：云端优先，失败回退设备引擎 */
+async function hwSpeak(text, en){
+  try{
+    const url = await hwCloudTts(text, en);
+    if(url && await hwPlayAudioUrl(url, 1)) return;
+  }catch(e){}
+  hwSpeakDevice(text, en);
+}
+/* 听写报词：一个词连播两遍（间隔 1.5 秒，第二遍稍降速）。云端优先，失败回退设备引擎 */
 function hwSpeakTwice(text, en){
+  try{
+    if(hwSpeakTwice._t2){ clearTimeout(hwSpeakTwice._t2); hwSpeakTwice._t2 = null; }
+    if(hwSpeakTwice._fb){ clearTimeout(hwSpeakTwice._fb); hwSpeakTwice._fb = null; }
+    if(hwSpeakTwice._r1){ clearTimeout(hwSpeakTwice._r1); hwSpeakTwice._r1 = null; }
+    hwSpeakTwice._started = false;   // 供听写弹窗做「引擎死亡检测」
+    hwCloudTts(text, en).then(url=>{
+      if(url){
+        hwSpeakTwice._started = true;
+        hwPlayAudioUrl(url, 1).then(ok=>{ if(ok) hwSpeakTwice._t2 = setTimeout(()=>{ hwPlayAudioUrl(url, 0.92); }, 1500); });
+        return;
+      }
+      hwSpeakTwiceDevice(text, en);
+    });
+  }catch(e){ try{ hwSpeakTwiceDevice(text, en); }catch(e2){} }
+}
+/* 设备引擎报词路径（云端不可用时的回退） */
+function hwSpeakTwiceDevice(text, en){
   try {
     if(!window.speechSynthesis){ hwSpeak(text, en); return; }
     const syn = window.speechSynthesis;
     syn.cancel();
     try{ syn.resume(); }catch(e){}   // 安卓 Chrome paused 卡死自救
-    if(hwSpeakTwice._t2){ clearTimeout(hwSpeakTwice._t2); hwSpeakTwice._t2 = null; }
-    if(hwSpeakTwice._fb){ clearTimeout(hwSpeakTwice._fb); hwSpeakTwice._fb = null; }
     const pp = hwPersonaParams();
     const mk = mul => {
       const u = new SpeechSynthesisUtterance(String(text));
@@ -14402,7 +14484,6 @@ function hwSpeakTwice(text, en){
     };
     let retried = false;
     const speakFirst = () => {
-      hwSpeakTwice._started = false;   // 供听写弹窗做「引擎死亡检测」
       const u1 = mk(1);
       u1.onstart = ()=>{ hwSpeakTwice._started = true; };
       u1.onend = playSecond;
@@ -14630,6 +14711,7 @@ function hwDictStart(iso, itemId, words, imgs){
     if(!document.getElementById('hwDictMask')) return;   // 弹窗已关，看门狗不再触发
     st2.dead = true;
     try{ window.speechSynthesis.cancel(); }catch(e){}
+    try{ if(hwCurAudio){ hwCurAudio.pause(); hwCurAudio = null; } }catch(e){}
     try{ showToast('📢 未检测到语音引擎，已切换为看词默写'); }catch(e){}
     ask(true);
   };
@@ -14637,9 +14719,13 @@ function hwDictStart(iso, itemId, words, imgs){
     const w = curWord();
     if(!useVoice()){ $('hdWord').textContent = '👀 ' + w; return; }
     hwSpeakTwice._started = false;
-    hwSpeakTwice(w, /[a-zA-Z]/.test(w));   // 每个词自动播两遍（间隔 1.5 秒）
+    hwSpeakTwice(w, /[a-zA-Z]/.test(w));   // 云端优先，失败回退设备引擎
+    const armWatch = ()=>{ st2.__watch = setTimeout(()=>{   // 云端合成期间顺延；最终 2s 毫无动静 → 判死，自动切看词默写
+      if(hwCloudBusy){ armWatch(); return; }
+      if(!hwSpeakTwice._started) goSelfRead();
+    }, 2000); };
     if(st2.__watch) clearTimeout(st2.__watch);
-    st2.__watch = setTimeout(()=>{ if(!hwSpeakTwice._started) goSelfRead(); }, 2000);   // 2 秒引擎还没开始说话 → 判死，自动切看词默写
+    armWatch();
   };
   const ask = (sync)=>{
     st.phase = 'play';
@@ -14659,9 +14745,9 @@ function hwDictStart(iso, itemId, words, imgs){
       st.__saidStart = true;
       const line = hwPersonaLine('start');
       if(line){
-        if(sync){ hwSpeak(line, false); }   // 首次必须在点击手势调用栈内 speak，否则 iOS 平板静音
-        else { setTimeout(()=>{ try{ hwSpeak(line, false); }catch(e){} }, 350); }
-        setTimeout(play, 1200 + line.length * 260);
+        const go = ()=>{ setTimeout(play, 500); };   // 开场白结束后停半秒再报词
+        if(sync){ hwSpeak(line, false).then(go).catch(go); }   // 首句紧跟点击手势发起
+        else { setTimeout(()=>{ hwSpeak(line, false).then(go).catch(go); }, 350); }
         return;
       }
     }
