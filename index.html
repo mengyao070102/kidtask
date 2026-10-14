@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609210" />
+<meta name="build-version" content="202609211" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14305,13 +14305,59 @@ function hwSplitTitleLines(text){
 /* ===== 听写任务：TTS 自动报词 → 孩子输入 → 自动对错 → 成绩单 ===== */
 let hwDictState = null;
 function hwNormAns(w){ return String(w||'').trim().toLowerCase().replace(/\s+/g,''); }
+/* ===== 听写声音人设：gentle=温柔女老师（默认） / muichiro=时透无一郎（系统 TTS 仿声） ===== */
+const HW_VOICE_KEY = 'kidtask_hw_voice_v1';
+function hwVoiceGet(){ try{ const v = localStorage.getItem(HW_VOICE_KEY); return v==='muichiro' ? 'muichiro' : 'gentle'; }catch(e){ return 'gentle'; } }
+function hwVoiceSet(v){ try{ localStorage.setItem(HW_VOICE_KEY, v==='muichiro' ? 'muichiro' : 'gentle'); }catch(e){} }
+/* 按人设挑声源：gentle 优先中文女声；muichiro 优先少年感男声（挑不到就靠 pitch 拉高变成清亮少年音） */
+function hwPickDictVoice(persona, en){
+  try{
+    if(!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
+    const vs = window.speechSynthesis.getVoices();
+    if(!vs.length) return null;
+    const langRe = en ? /en[-_]?US/i : /^zh|chinese|中文|普通话|国语/i;
+    let pool = vs.filter(v=> langRe.test((v.lang||'')+' '+(v.name||'')));
+    if(!pool.length) pool = vs;
+    const nm = v => (v.name||'').toLowerCase();
+    if(persona==='muichiro'){
+      const boyKw = ['yunxi','yunye','yunjhe','kangkang','male','男','danny','david','eric','brian','james','guy','steffi-neural-male'];
+      const boy = pool.find(v=> boyKw.some(k=> nm(v).includes(k)) && !/female|女/.test(nm(v)));
+      return boy || null;
+    }
+    const femKw = ['female','女','xiaoxiao','xiaoyi','huihui','yaoyao','tingting','ting-ting','meijia','sinji','ruyi','yating','hsiao','shanshu','hiu','悦悦','晓晓','小晓','小依'];
+    const fem = pool.find(v=> femKw.some(k=> nm(v).includes(k)));
+    return fem || pool[0];
+  }catch(e){ return null; }
+}
+/* 人设语音参数：温柔女=慢一点+略提音调更暖；无一郎=更慢+明显提音调成清亮少年感 */
+function hwPersonaParams(){
+  if(hwVoiceGet()==='muichiro') return { zhRate:0.78, enRate:0.72, zhPitch:1.35, enPitch:1.15 };
+  return { zhRate:0.8, enRate:0.75, zhPitch:1.1, enPitch:1.0 };
+}
+/* 人设小台词：只在开始/结束时说，不打断报词节奏 */
+const HW_MUI_LINES = {
+  start: ['……嗯，雾有点大。不过没关系，我念，你写就好。','……云在动呢。那，开始吧，每个词我念两遍。'],
+  again: ['……嗯，还行。雾散了，去核对词表吧。','……写完了？嗯，比想象中认真嘛。去检查一遍。']
+};
+const HW_GENTLE_LINES = {
+  start: ['小耳朵准备好啦～我念你写，一笔一画写工整哦！','听写要开始咯～别着急，每个词都会念两遍的！'],
+  again: ['全部念完啦～去对照词表检查一下吧，检查也是一种练习哦！']
+};
+function hwPersonaLine(kind){
+  const lib = hwVoiceGet()==='muichiro' ? HW_MUI_LINES : HW_GENTLE_LINES;
+  const arr = lib[kind] || [];
+  return arr.length ? arr[kkRand(arr.length)] : '';
+}
 function hwSpeak(text, en){
   try {
     if(!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(String(text));
     u.lang = en ? 'en-US' : 'zh-CN';
-    u.rate = en ? 0.75 : 0.85;
+    const pp = hwPersonaParams();
+    u.rate = en ? pp.enRate : pp.zhRate;
+    u.pitch = en ? pp.enPitch : pp.zhPitch;
+    const v = hwPickDictVoice(hwVoiceGet(), en); if(v) u.voice = v;
     window.speechSynthesis.speak(u);
   } catch(e){}
 }
@@ -14323,10 +14369,13 @@ function hwSpeakTwice(text, en){
     syn.cancel();
     if(hwSpeakTwice._t2){ clearTimeout(hwSpeakTwice._t2); hwSpeakTwice._t2 = null; }
     if(hwSpeakTwice._fb){ clearTimeout(hwSpeakTwice._fb); hwSpeakTwice._fb = null; }
-    const mk = rate => {
+    const pp = hwPersonaParams();
+    const mk = mul => {
       const u = new SpeechSynthesisUtterance(String(text));
       u.lang = en ? 'en-US' : 'zh-CN';
-      u.rate = (en ? 0.75 : 0.85) * rate;
+      u.rate = (en ? pp.enRate : pp.zhRate) * mul;
+      u.pitch = en ? pp.enPitch : pp.zhPitch;
+      const v = hwPickDictVoice(hwVoiceGet(), en); if(v) u.voice = v;
       return u;
     };
     let firstDone = false;
@@ -14528,21 +14577,37 @@ function hwDictStart(iso, itemId, words, imgs){
       <button class="hw-dict-btn" id="hdNext" style="background:var(--accent-d);">➡️ 下一个</button>
       <button class="hw-dict-btn" id="hdQuit" style="background:#9a8a96;">结束</button>
     </div>
+    <div style="display:flex;gap:6px;justify-content:center;margin-top:10px;">
+      <button class="hw-dict-btn" id="hdVg" style="padding:6px 12px;font-size:12px;">🌸 温柔女老师</button>
+      <button class="hw-dict-btn" id="hdVm" style="padding:6px 12px;font-size:12px;">🌫️ 时透无一郎</button>
+    </div>
   </div>`;
   document.body.appendChild(mask);
   const $ = id => document.getElementById(id);
   const st = hwDictState;
   const curWord = () => st.words[st.idx];
+  const paintVoice = ()=>{
+    const p = hwVoiceGet();
+    const vg = $('hdVg'), vm = $('hdVm');
+    if(vg) vg.style.background = p==='gentle' ? 'var(--accent-d,#7a5fb0)' : '#c9c2d4';
+    if(vm) vm.style.background = p==='muichiro' ? '#5f7f9c' : '#c9c2d4';
+  };
   const play = ()=>{ const w = curWord(); hwSpeakTwice(w, /[a-zA-Z]/.test(w)); };   // 每个词自动播两遍（间隔 1.5 秒）
   const ask = ()=>{
     st.phase = 'play';
     $('hdProg').textContent = `《${st.title||'听写'}》第 ${st.idx+1}/${st.words.length} 个`;
     $('hdWord').textContent = '🎧 听';
     $('hdNext').textContent = (st.idx + 1 >= st.words.length) ? '🏁 听完了' : '➡️ 下一个';
+    if(st.idx===0 && !st.__saidStart){   // 开场白只说一次，念完再报第一个词
+      st.__saidStart = true;
+      const line = hwPersonaLine('start');
+      if(line){ hwSpeak(line, false); setTimeout(play, 1200 + line.length * 260); return; }
+    }
     setTimeout(play, 350);
   };
   const finish = ()=>{
     st.phase = 'done';
+    try{ const line = hwPersonaLine('again'); if(line) hwSpeak(line, false); }catch(e){}
     mask.innerHTML = `<div class="hw-dict-pop" style="max-width:340px;">
       <div style="font-size:30px;">📖</div>
       <div style="font-weight:700;margin:4px 0 2px;">听写完成！对照下面的词表检查吧</div>
@@ -14567,6 +14632,10 @@ function hwDictStart(iso, itemId, words, imgs){
   $('hdPlay').onclick = play;
   $('hdNext').onclick = goNext;
   $('hdQuit').onclick = ()=>{ mask.remove(); hwDictState = null; };
+  const vg = $('hdVg'), vm = $('hdVm');
+  if(vg) vg.onclick = ()=>{ hwVoiceSet('gentle'); paintVoice(); play(); };
+  if(vm) vm.onclick = ()=>{ hwVoiceSet('muichiro'); paintVoice(); play(); };
+  paintVoice();
   ask();
 }
 
