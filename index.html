@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609217" />
+<meta name="build-version" content="202609218" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14309,15 +14309,15 @@ function hwNormAns(w){ return String(w||'').trim().toLowerCase().replace(/\s+/g,
 const HW_VOICE_KEY = 'kidtask_hw_voice_v1';
 function hwVoiceGet(){ try{ const v = localStorage.getItem(HW_VOICE_KEY); return v==='muichiro' ? 'muichiro' : 'gentle'; }catch(e){ return 'gentle'; } }
 function hwVoiceSet(v){ try{ localStorage.setItem(HW_VOICE_KEY, v==='muichiro' ? 'muichiro' : 'gentle'); }catch(e){} }
-/* 按人设挑声源：gentle 优先中文女声；muichiro 优先少年感男声（挑不到就靠 pitch 拉高变成清亮少年音） */
+/* 按人设挑声源：gentle 优先中文女声；muichiro 优先少年感男声（挑不到就靠 pitch 拉高变成清亮少年音）。
+   ★ 声源语言必须严格匹配（读中文绝不能配英文声包——iOS 错配会念成含糊天书），匹配不到就交给系统默认 */
 function hwPickDictVoice(persona, en){
   try{
     if(!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
     const vs = window.speechSynthesis.getVoices();
     if(!vs.length) return null;
-    const langRe = en ? /en[-_]?US/i : /^zh|chinese|中文|普通话|国语/i;
-    let pool = vs.filter(v=> langRe.test((v.lang||'')+' '+(v.name||'')));
-    if(!pool.length) pool = vs;
+    const pool = en ? vs.filter(v=> /^en/i.test(v.lang||'')) : vs.filter(v=> /^zh/i.test(v.lang||''));
+    if(!pool.length) return null;   // 宁可不用自定义声源，也不张冠李戴
     const nm = v => (v.name||'').toLowerCase();
     if(persona==='muichiro'){
       const boyKw = ['yunxi','yunye','yunjhe','kangkang','male','男','danny','david','eric','brian','james','guy','steffi-neural-male'];
@@ -14329,10 +14329,10 @@ function hwPickDictVoice(persona, en){
     return fem || pool[0];
   }catch(e){ return null; }
 }
-/* 人设语音参数：放慢语速孩子才听得清（读太快后面的字会糊）；无一郎另提音调成清亮少年感 */
+/* 人设语音参数：iOS 上音调过高/语速过慢都会糊，回调到自然清晰区间；无一郎只轻微提音调保留少年感 */
 function hwPersonaParams(){
-  if(hwVoiceGet()==='muichiro') return { zhRate:0.68, enRate:0.66, zhPitch:1.35, enPitch:1.15 };
-  return { zhRate:0.68, enRate:0.66, zhPitch:1.1, enPitch:1.0 };
+  if(hwVoiceGet()==='muichiro') return { zhRate:0.8, enRate:0.75, zhPitch:1.2, enPitch:1.1 };
+  return { zhRate:0.8, enRate:0.75, zhPitch:1.05, enPitch:1.0 };
 }
 /* TTS 可用性 + 解锁：iOS Safari 要求第一次 speak() 发生在用户点击手势的调用栈内，
    否则本次会话所有朗读都静音（平板端「点听写没声音」的主因）；顺带触发部分安卓浏览器音色列表加载 */
@@ -14443,13 +14443,15 @@ function hwSpeakTwice(text, en){
     hwSpeakTwice._started = false;   // 供听写弹窗做「引擎死亡检测」
     hwCloudTts(text, en).then(url=>{
       if(url){
+        hwSpeakTwice._src = 'cloud';
         hwSpeakTwice._started = true;
         hwPlayAudioUrl(url, 1).then(ok=>{ if(ok) hwSpeakTwice._t2 = setTimeout(()=>{ hwPlayAudioUrl(url, 0.92); }, 1500); });
         return;
       }
+      hwSpeakTwice._src = 'device';
       hwSpeakTwiceDevice(text, en);
     });
-  }catch(e){ try{ hwSpeakTwiceDevice(text, en); }catch(e2){} }
+  }catch(e){ hwSpeakTwice._src = 'device'; try{ hwSpeakTwiceDevice(text, en); }catch(e2){} }
 }
 /* 设备引擎报词路径（云端不可用时的回退） */
 function hwSpeakTwiceDevice(text, en){
@@ -14707,7 +14709,13 @@ function hwDictStart(iso, itemId, words, imgs){
   const play = ()=>{
     const w = curWord();
     if(!tts){ $('hdWord').textContent = '👀 ' + w; return; }
+    hwSpeakTwice._src = '';
     hwSpeakTwice(w, /[a-zA-Z]/.test(w));   // 云端优先，失败回退设备引擎
+    let srcTries = 0;   // 显示语音来源：方便判断云端/设备哪条路
+    const srcTimer = setInterval(()=>{ try{
+      const el = document.getElementById('hdFb');
+      if(!el || hwSpeakTwice._src || ++srcTries > 6){ clearInterval(srcTimer); if(el && hwSpeakTwice._src) el.textContent = (hwSpeakTwice._src === 'cloud' ? '☁️ 云端语音' : '📱 设备语音') + '，写在纸上哦～'; return; }
+    }catch(e){ clearInterval(srcTimer); } }, 700);
   };
   const ask = (sync)=>{
     st.phase = 'play';
