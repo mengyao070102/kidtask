@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609216" />
+<meta name="build-version" content="202609217" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14349,12 +14349,14 @@ function hwTtsUnlock(){
   }catch(e){}
   hwAudioUnlock();   // 同时解锁 <audio>（云端 TTS 用）
 }
+/* 合成文本补尾标点：让引擎把词读完整、带自然收尾（治「最后一个字消失太快」） */
+function hwTtsPad(text, en){ return String(text) + (en ? '. ' : '。'); }
 function hwSpeakDevice(text, en){
   try {
     if(!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     try{ window.speechSynthesis.resume(); }catch(e){}
-    const u = new SpeechSynthesisUtterance(String(text));
+    const u = new SpeechSynthesisUtterance(hwTtsPad(text, en));
     u.lang = en ? 'en-US' : 'zh-CN';
     const pp = hwPersonaParams();
     u.rate = en ? pp.enRate : pp.zhRate;
@@ -14384,7 +14386,7 @@ async function hwCloudTts(text, en){
     const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: String(text).slice(0, 120), voice: hwCloudVoiceId(), response_format: 'mp3', speed: 0.8 }),   // 放慢语速，孩子听得清
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'mp3', speed: 0.8 }),   // 放慢语速 + 补尾标点，孩子听得清
       signal: ctrl ? ctrl.signal : undefined
     });
     if(to) clearTimeout(to);
@@ -14458,7 +14460,7 @@ function hwSpeakTwiceDevice(text, en){
     try{ syn.resume(); }catch(e){}   // 安卓 Chrome paused 卡死自救
     const pp = hwPersonaParams();
     const mk = mul => {
-      const u = new SpeechSynthesisUtterance(String(text));
+      const u = new SpeechSynthesisUtterance(hwTtsPad(text, en));   // 补尾标点：读完整不掐尾
       u.lang = en ? 'en-US' : 'zh-CN';
       u.rate = (en ? pp.enRate : pp.zhRate) * mul;
       u.pitch = en ? pp.enPitch : pp.zhPitch;
