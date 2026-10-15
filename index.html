@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609223" />
+<meta name="build-version" content="202609224" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14392,6 +14392,7 @@ let hwCloudBusy = false;
 let hwCloudDead = false;   // 云端一次失败即拉黑（本次会话不再等它，回退秒切设备引擎）
 let hwCurAudio = null;
 const hwCloudCache = {};
+const hwInflight = {};   // 进行中的合成去重：同一词并发请求只发一次
 function hwCloudVoiceId(){ return HW_CLOUD_TTS_MODEL + ':' + hwCloudVoiceCur(); }
 /* 修复云端 wav 三件事：① 服务端是流式头，时长字段是占位大数 → 按实际字节修正；② 末尾补 0.4s 静音，收尾不突兀；③ 最后 60ms 线性淡出防爆音 */
 function hwWavFix(buf){
@@ -14426,11 +14427,11 @@ function hwWavFix(buf){
     return out.buffer;
   }catch(e){ return buf; }
 }
-/* 解析 wav 实际时长（秒）：服务端是流式头，头里的时长字段是假的，按 data 块实际字节算 */
-function hwWavSec(buf){
+/* 解析 wav 头（服务端是流式头，时长字段是假的，按 data 块实际字节算） */
+function hwWavParse(buf){
   try{
     const dv = new DataView(buf);
-    if(buf.byteLength < 44 || dv.getUint32(0, true) !== 0x46464952) return 0;
+    if(buf.byteLength < 44 || dv.getUint32(0, true) !== 0x46464952) return null;
     let off = 12, fmtOff = -1, dataOff = -1;
     while(off + 8 <= buf.byteLength){
       const id = dv.getUint32(off, true), sz = dv.getUint32(off + 4, true);
@@ -14438,40 +14439,94 @@ function hwWavSec(buf){
       else if(id === 0x61746164){ dataOff = off + 8; break; }                     // 'data'
       off += 8 + sz + (sz % 2);
     }
-    if(fmtOff < 0 || dataOff < 0) return 0;
+    if(fmtOff < 0 || dataOff < 0) return null;
     const numCh = dv.getUint16(fmtOff + 2, true);
     const sr = dv.getUint32(fmtOff + 4, true);
     const bits = dv.getUint16(fmtOff + 14, true);
-    if(bits !== 16 || numCh < 1 || sr < 8000) return 0;
-    return (buf.byteLength - dataOff) / (sr * numCh * 2);
-  }catch(e){ return 0; }
+    if(bits !== 16 || numCh < 1 || sr < 8000) return null;
+    return { dv: dv, dataOff: dataOff, dataLen: buf.byteLength - dataOff, numCh: numCh, sr: sr };
+  }catch(e){ return null; }
 }
-/* 云端合成核心（带质检重试）：服务端会随机截断输出（实测同词两次 0.35s vs 1.09s），
-   所以每次合成后按字数算出「至少该多长」，不合格自动重试，最多 3 次取最长的一条 */
+function hwWavSec(buf){ const p = hwWavParse(buf); return p ? p.dataLen / (p.sr * p.numCh * 2) : 0; }
+/* 结尾衰减体检：截断废品的最后一拍仍接近满振幅；完整收尾必然衰减到峰值的 28% 以下 */
+function hwWavTailOk(buf){
+  try{
+    const p = hwWavParse(buf); if(!p) return true;
+    const samples = Math.floor(p.dataLen / 2);
+    if(samples < p.sr / 10) return true;   // 极短另由时长门处理
+    let peak = 0;
+    for(let i = 0; i < samples; i++){
+      const v = Math.abs(p.dv.getInt16(p.dataOff + i * 2, true));
+      if(v > peak) peak = v;
+    }
+    if(peak <= 0) return true;
+    const tailN = Math.min(Math.floor(p.sr * 0.08) * p.numCh, samples);
+    let sum = 0;
+    for(let i = 0; i < tailN; i++){
+      const v = p.dv.getInt16(p.dataOff + (samples - tailN + i) * 2, true);
+      sum += v * v;
+    }
+    return Math.sqrt(sum / tailN) < peak * 0.28;
+  }catch(e){ return true; }
+}
+/* IndexedDB 持久缓存：质检合格的词条音频存本地，之后秒播且不再受服务端抽风影响 */
+function hwTtsDbGet(key){
+  return new Promise(res=>{
+    try{
+      const dbm = (typeof window !== 'undefined') ? window.indexedDB : null;
+      if(!dbm) return res(null);
+      const rq = dbm.open('kidtask_tts_db', 1);
+      rq.onupgradeneeded = ()=>{ try{ rq.result.createObjectStore('clips'); }catch(e){} };
+      rq.onerror = ()=>res(null);
+      rq.onsuccess = ()=>{
+        try{
+          const g = rq.result.transaction('clips', 'readonly').objectStore('clips').get(key);
+          g.onsuccess = ()=>res(g.result || null);
+          g.onerror = ()=>res(null);
+        }catch(e){ res(null); }
+      };
+    }catch(e){ res(null); }
+  });
+}
+function hwTtsDbSet(key, buf){
+  try{
+    const dbm = (typeof window !== 'undefined') ? window.indexedDB : null;
+    if(!dbm || !buf) return;
+    const rq = dbm.open('kidtask_tts_db', 1);
+    rq.onupgradeneeded = ()=>{ try{ rq.result.createObjectStore('clips'); }catch(e){} };
+    rq.onsuccess = ()=>{
+      try{ rq.result.transaction('clips', 'readwrite').objectStore('clips').put(buf, key); }catch(e){}
+    };
+  }catch(e){}
+}
+/* 云端合成核心（双重质检重试）：服务端会随机截断输出（实测同词两次 0.35s vs 1.09s）。
+   ① 时长不低于按字数算的下限；② 结尾必须自然衰减（截断废品结尾仍是满振幅）。
+   最多 5 次，用合格的一条；全不合格取最长的一条兜底 */
 async function hwCloudFetchTts(input, voiceId, en){
   const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
   if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return { err: 'nokey' };
   const chars = String(input).replace(/[\s。，、,.!?！？]/g, '').length || 1;
   const needMs = en ? chars * 80 + 150 : chars * 200 + 100;   // 合格下限：中文 0.2s/字、英文 0.08s/字（留余量）
   const ctrl = ('AbortController' in window) ? new AbortController() : null;
-  const to = ctrl ? setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, 4500) : null;
   let best = null;
   try{
-    for(let i = 0; i < 3; i++){
+    for(let i = 0; i < 5; i++){
+      const to = ctrl ? setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, 4500) : null;
       const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
         body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: input, voice: voiceId, response_format: 'wav', speed: 0.8 }),   // wav 无损 + 服务端默认采样率（实测传 44100 采样率参数会让输出截短 1/3=词尾被掐，勿加）
         signal: ctrl ? ctrl.signal : undefined
       });
+      if(to) clearTimeout(to);
       if(!res.ok){ return { err: 'http' }; }
       const ab = await res.arrayBuffer();
       const dur = hwWavSec(ab);
-      if(!best || dur > best.dur) best = { ab: ab, dur: dur };
-      if(best.dur * 1000 >= needMs) break;   // 时长达标，收工
+      const good = dur * 1000 >= needMs && hwWavTailOk(ab);
+      if(good){ best = { ab: ab, dur: dur, good: true }; break; }   // 双检合格，收工
+      if(!best || dur > best.dur) best = { ab: ab, dur: dur, good: false };   // 没合格的就先攒最长的
     }
   }catch(e){ /* 超时/网络错：用手头最好的一条 */ }
-  if(to) clearTimeout(to);
   if(!best || best.ab.byteLength < 500) return { err: 'http' };   // 太小说明不是有效音频
   return { buf: hwWavFix(best.ab) };
 }
@@ -14479,17 +14534,44 @@ async function hwCloudTts(text, en){
   if(hwCloudDead) return null;
   const key = (en ? 'E|' : 'C|') + hwCloudVoiceCur() + '|' + String(text);
   if(hwCloudCache[key]) return hwCloudCache[key];
+  if(hwInflight[key]) return hwInflight[key];
+  const cached = await hwTtsDbGet(key);   // 本地持久缓存：之前质检过的词条直接秒播
+  if(cached){
+    try{
+      const url = URL.createObjectURL(new Blob([cached], { type: 'audio/wav' }));
+      hwCloudCache[key] = url;
+      return url;
+    }catch(e){}
+  }
+  if(hwCloudDead) return null;
   hwCloudBusy = true;
-  const r = await hwCloudFetchTts(hwTtsPad(String(text).slice(0, 118), en), hwCloudVoiceId(), en);
-  hwCloudBusy = false;
-  if(!r || r.err){ hwCloudDead = true; return null; }
-  try{
-    const url = URL.createObjectURL(new Blob([r.buf], { type: 'audio/wav' }));
-    hwCloudCache[key] = url;                    // 同词同声音复用，第二次播放零延迟
-    const ks = Object.keys(hwCloudCache);
-    if(ks.length > 60){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
-    return url;
-  }catch(e){ hwCloudDead = true; return null; }
+  const pr = (async()=>{
+    const r = await hwCloudFetchTts(hwTtsPad(String(text).slice(0, 118), en), hwCloudVoiceId(), en);
+    hwCloudBusy = false;
+    if(!r || r.err){ hwCloudDead = true; return null; }
+    try{
+      hwTtsDbSet(key, r.buf);   // 质检合格的存本地，下次不再合成
+      const url = URL.createObjectURL(new Blob([r.buf], { type: 'audio/wav' }));
+      hwCloudCache[key] = url;                    // 同词同声音复用，第二次播放零延迟
+      const ks = Object.keys(hwCloudCache);
+      if(ks.length > 60){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
+      return url;
+    }catch(e){ hwCloudDead = true; return null; }
+  })();
+  hwInflight[key] = pr;
+  const out = await pr;
+  delete hwInflight[key];
+  return out;
+}
+/* 列表预生成：点开听写就后台把全部词质检合成好（存 IndexedDB），孩子翻到哪个词哪个词秒播 */
+async function hwTtsPreGen(words){
+  for(const w of (words || [])){
+    if(hwCloudDead) return;
+    const t = String(w || '').trim();
+    if(!t) continue;
+    try{ await hwCloudTts(t, /[a-zA-Z]/.test(t)); }catch(e){}
+    await new Promise(r=>setTimeout(r, 120));
+  }
 }
 /* 试音面板：指定音色合成一句示例并返回音频地址（不受云端拉黑影响，结果缓存） */
 const hwAudCache = {};
@@ -14905,6 +14987,7 @@ function hwDictStart(iso, itemId, words, imgs){
   };
   paintVoice();
   ask(true);   // 首词同步播：挂在用户点击手势调用栈内，解锁 iOS/平板 TTS
+  hwTtsPreGen(st.words);   // 后台预生成整张词表（质检+本地缓存），后面的词翻到就秒播
 }
 
 /* 同步诊断与自救：渲染本机状态、提供强制拉取/重连/复制同家庭链接 */
