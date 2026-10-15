@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609226" />
+<meta name="build-version" content="202609227" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -15217,14 +15217,21 @@ function buildSyncPayload(){
   } catch(e){}
   return json;
 }
+/* 发送端脏标记：任何因「正在合并远端 / 未连接 / 假在线」而没能发出的本机编辑都记一笔，
+   在管道恢复通畅的任何时刻（收到任何消息 / 周期对账 / 远端合并完成 / 切后台冲刷）自动补推。
+   没有它，iOS 在这些窗口创建的内容会被静默丢弃且永远不再发送（其他端看不到）。 */
+let syncDirty = false;
 function pushSync(force){
-  if(syncing) return;                       // 应用远端中，不回推
-  if(!syncConnected || !mqttClient) return; // 未连接则不同步（保持本地）
+  if(syncing){ syncDirty = true; return; }                       // 应用远端中：标记待发，合并完成自动补推
+  if(!syncConnected || !mqttClient){ syncDirty = true; return; } // 未连接：标记待发，连上自动补推（connect 回调有全量补推）
   const send = ()=>{
     pushTimer = null;
-    if(!syncConnected || !mqttClient || !mqttClient.connected || syncing) return;   // mqttClient.connected 实测活性：僵尸连接（iOS 冻结后假在线）不往死管道发
-    try { mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true }); }   // QoS1：至少一次送达（库在 PUBACK 前自动重传），配合重连补推防 WiFi 抖动丢消息
-    catch(e){ setTimeout(()=>{ if(syncConnected) pushSync(true); }, 2000); } // 发布异常则 2 秒后补推
+    if(!syncConnected || !mqttClient || !mqttClient.connected || syncing){ syncDirty = true; return; }   // mqttClient.connected 实测活性：僵尸连接（iOS 冻结后假在线）不往死管道发，但记为待发
+    try {
+      mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true });   // QoS1：至少一次送达（库在 PUBACK 前自动重传），配合重连补推防 WiFi 抖动丢消息
+      syncDirty = false;   // 全量快照已发出，本机编辑已覆盖，清脏标记
+    }
+    catch(e){ syncDirty = true; setTimeout(()=>{ if(syncConnected) pushSync(true); }, 2000); } // 发布异常则 2 秒后补推
   };
   if(force){ clearTimeout(pushTimer); pushTimer = null; send(); }
   else if(!pushTimer){ pushTimer = setTimeout(send, 400); }
@@ -15537,6 +15544,7 @@ function applySyncState(obj){
   }
   syncing = false;
   syncFirstApplied = true;   // 标记已完成至少一次与 peer 的合并，之后出现的编辑冲突才提示
+  try{ if(syncDirty && syncConnected && mqttClient && mqttClient.connected) pushSync(true); }catch(e){}   // 合并窗口内产生/标记的本机编辑，现在补发
 }
 
 /* iOS 生命周期处理（苹果手机编辑后不同步的根因修复）：
@@ -15563,9 +15571,12 @@ function syncForceRebuild(){
 }
 function syncFlushPending(){
   try{
-    if(pushTimer && syncConnected && mqttClient && mqttClient.connected && !syncing){
-      clearTimeout(pushTimer); pushTimer = null;
+    if(!syncConnected || !mqttClient || !mqttClient.connected || syncing) return;
+    const hasPending = !!pushTimer || syncDirty;   // 防抖中有编辑 或 有未发出的待发编辑
+    if(pushTimer){ clearTimeout(pushTimer); pushTimer = null; }
+    if(hasPending){   // iOS 切后台/锁屏前最后的补发机会
       mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true });
+      syncDirty = false;
     }
   }catch(e){}
 }
@@ -15605,7 +15616,7 @@ function connectSync(){
         /* 首次连接也可能是死管道（iOS 网络切换后刚恢复）：连接成功即上探针，本机自己的快照/request 回声 4 秒内未到达 → 看门狗强制重建 */
         syncProbePending = true; syncProbeAt = Date.now();
       });
-      mqttClient.on('message', (topic, payload)=>{ syncProbePending = false; try{ handleSyncMessage(topic, payload); }catch(e){} });   // 任何消息到达（含自身回声）= 接收路径通畅，撤探针
+      mqttClient.on('message', (topic, payload)=>{ syncProbePending = false; try{ handleSyncMessage(topic, payload); }catch(e){} try{ if(syncDirty && !syncing && syncConnected && mqttClient && mqttClient.connected) pushSync(true); }catch(e){} });   // 任何消息到达（含自身回声）= 接收路径通畅，撤探针；有未发出的本机编辑则立即补推
       mqttClient.on('error', ()=> setSyncStatus('off', '同步出错'));
       mqttClient.on('close', ()=>{ syncConnected = false; syncProbePending = false; setSyncStatus('off', '同步已断开'); });
       mqttClient.on('reconnect', ()=>{ setSyncStatus('pending', '同步重连中…'); try { requestState(); pushSync(true); } catch(e){} }); // 重连后主动补齐：拉最新 + 重发本机状态，修复断线期间漏同步
@@ -15624,7 +15635,7 @@ function connectSync(){
             if(Date.now() - syncRebuildAt > 15000){ try{ syncForceRebuild(); }catch(e){} }
           }
         }, 2000);
-        setInterval(()=>{ if(syncConnected){ try { requestState(); } catch(e){} } }, 180000);
+        setInterval(()=>{ if(syncConnected){ try { requestState(); } catch(e){} try { pushSync(true); } catch(e){} } }, 180000);   // 周期对账：拉最新 + 补推本机（修复「合并窗口内创建的内容被丢弃后无人补发」）
       }
     } catch(e){ setSyncStatus('off', '同步不可用'); }
   });
