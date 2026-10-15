@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609219" />
+<meta name="build-version" content="202609220" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14367,15 +14367,35 @@ function hwSpeakDevice(text, en){
 }
 /* ===== 云端 TTS 优先（不依赖手机语音引擎）：SiliconFlow CosyVoice2，失败自动回退设备引擎 ===== */
 const HW_CLOUD_TTS_MODEL = 'FunAudioLLM/CosyVoice2-0.5B';
-const HW_CLOUD_VOICE = { gentle: 'claire', muichiro: 'alex' };   // 温柔女老师→claire（咬字最清晰的标准女声，anna 偏轻软外放易糊），时透无一郎→清亮少年 alex
+const HW_CLOUD_VOICE = { gentle: 'claire', muichiro: 'alex' };   // 默认音色：温柔女老师→claire，时透无一郎→alex（可在试音面板里自定义）
+const HW_CLOUD_VOICE_LIST = [
+  { id:'claire', label:'🌸 claire · 标准清晰' },
+  { id:'bella',  label:'🌼 bella · 清亮活泼' },
+  { id:'diana',  label:'🌷 diana · 沉稳大气' },
+  { id:'anna',   label:'🍡 anna · 轻柔（小喇叭易糊）' },
+  { id:'alex',   label:'🌫️ alex · 清亮少年' }
+];
+function hwCloudVoiceOvGet(){
+  try{ return JSON.parse(localStorage.getItem('kidtask_hw_cloudvoice_v1')) || {}; }catch(e){ return {}; }
+}
+function hwCloudVoiceSet(persona, id){
+  try{
+    const ov = hwCloudVoiceOvGet(); ov[persona] = id;
+    localStorage.setItem('kidtask_hw_cloudvoice_v1', JSON.stringify(ov));
+  }catch(e){}
+}
+function hwCloudVoiceCur(){
+  const ov = hwCloudVoiceOvGet();
+  return ov[hwVoiceGet()] || HW_CLOUD_VOICE[hwVoiceGet()] || 'claire';
+}
 let hwCloudBusy = false;
 let hwCloudDead = false;   // 云端一次失败即拉黑（本次会话不再等它，回退秒切设备引擎）
 let hwCurAudio = null;
 const hwCloudCache = {};
-function hwCloudVoiceId(){ return HW_CLOUD_TTS_MODEL + ':' + (HW_CLOUD_VOICE[hwVoiceGet()] || 'claire'); }
+function hwCloudVoiceId(){ return HW_CLOUD_TTS_MODEL + ':' + hwCloudVoiceCur(); }
 async function hwCloudTts(text, en){
   if(hwCloudDead) return null;
-  const key = (en ? 'E|' : 'C|') + hwVoiceGet() + '|' + String(text);
+  const key = (en ? 'E|' : 'C|') + hwCloudVoiceCur() + '|' + String(text);
   if(hwCloudCache[key]) return hwCloudCache[key];
   const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
   if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return null;
@@ -14386,7 +14406,7 @@ async function hwCloudTts(text, en){
     const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'mp3', speed: 0.8 }),   // 放慢语速 + 补尾标点，孩子听得清
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'mp3', sample_rate: 44100, speed: 0.8 }),   // 高采样率 44.1kHz（默认 32k 是发闷主因）+ 放慢语速 + 补尾标点
       signal: ctrl ? ctrl.signal : undefined
     });
     if(to) clearTimeout(to);
@@ -14400,6 +14420,26 @@ async function hwCloudTts(text, en){
     if(ks.length > 120){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
     return url;
   }catch(e){ if(to) clearTimeout(to); hwCloudBusy = false; hwCloudDead = true; return null; }
+}
+/* 试音面板：指定音色合成一句示例并返回音频地址（不受云端拉黑影响，结果缓存） */
+const hwAudCache = {};
+async function hwCloudAudition(vid){
+  if(hwAudCache[vid]) return hwAudCache[vid];
+  try{
+    const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
+    if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return null;
+    const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad('请把这个词写在纸上', false), voice: HW_CLOUD_TTS_MODEL + ':' + vid, response_format: 'mp3', sample_rate: 44100, speed: 0.8 })
+    });
+    if(!res.ok) return null;
+    const blob = await res.blob();
+    if(!blob || blob.size < 500) return null;
+    const url = URL.createObjectURL(blob);
+    hwAudCache[vid] = url;
+    return url;
+  }catch(e){ return null; }
 }
 /* 播放云端音频：成功 resolve(true)，被拦截/失败 resolve(false) */
 function hwPlayAudioUrl(url, rate){
@@ -14693,6 +14733,8 @@ function hwDictStart(iso, itemId, words, imgs){
       <button class="hw-dict-btn" id="hdVg" style="padding:6px 12px;font-size:12px;">🌸 温柔女老师</button>
       <button class="hw-dict-btn" id="hdVm" style="padding:6px 12px;font-size:12px;">🌫️ 时透无一郎</button>
     </div>
+    <div style="text-align:center;margin-top:6px;"><button class="hw-dict-btn" id="hdVBtn" style="padding:5px 12px;font-size:11px;background:#e8e2f0;">🎚️ 试音选声（哪个听得清选哪个）</button></div>
+    <div id="hdVp" style="display:none;margin:8px 0 2px;padding:8px 10px;background:#f7f4fb;border-radius:10px;"></div>
   </div>`;
   document.body.appendChild(mask);
   const $ = id => document.getElementById(id);
@@ -14757,8 +14799,48 @@ function hwDictStart(iso, itemId, words, imgs){
   $('hdNext').onclick = goNext;
   $('hdQuit').onclick = closeDict;
   const vg = $('hdVg'), vm = $('hdVm');
-  if(vg) vg.onclick = ()=>{ hwVoiceSet('gentle'); paintVoice(); play(); };
-  if(vm) vm.onclick = ()=>{ hwVoiceSet('muichiro'); paintVoice(); play(); };
+  if(vg) vg.onclick = ()=>{ hwVoiceSet('gentle'); paintVoice(); paintVoicePanel(); play(); };
+  if(vm) vm.onclick = ()=>{ hwVoiceSet('muichiro'); paintVoice(); paintVoicePanel(); play(); };
+  /* 试音选声面板：点 ▶️ 试听该音色示例句，点 ✅ 选用为当前人设的听写声音 */
+  const paintVoicePanel = ()=>{
+    const p = $('hdVp');
+    if(!p || p.style.display === 'none') return;
+    const cur = hwCloudVoiceCur();
+    p.innerHTML = HW_CLOUD_VOICE_LIST.map(v=>{
+      const isCur = v.id === cur;
+      return `<div style="display:flex;align-items:center;gap:6px;margin:4px 0;">
+        <span style="flex:1;text-align:left;font-size:12px;color:#554;">${isCur ? '✓ ' : ''}${v.label}</span>
+        <button data-vid="${v.id}" data-act="play" class="hw-dict-btn" style="padding:4px 8px;font-size:11px;">▶️ 试听</button>
+        <button data-vid="${v.id}" data-act="use" class="hw-dict-btn" style="padding:4px 8px;font-size:11px;background:var(--accent-d,#7a5fb0);">✅ 选用</button>
+      </div>`;
+    }).join('') + `<div style="font-size:11px;color:#998;margin-top:4px;">试听后点「选用」，之后报词就用这个声音</div>`;
+  };
+  const vbtn = $('hdVBtn'), vp = $('hdVp');
+  if(vbtn) vbtn.onclick = ()=>{
+    if(!vp) return;
+    vp.style.display = vp.style.display === 'none' ? 'block' : 'none';
+    paintVoicePanel();
+  };
+  if(vp) vp.onclick = async (e)=>{
+    const b = e.target.closest('button[data-vid]');
+    if(!b) return;
+    const vid = b.getAttribute('data-vid'), act = b.getAttribute('data-act');
+    if(act === 'use'){
+      hwCloudVoiceSet(hwVoiceGet(), vid);
+      try{ showToast('✅ 已选用，报词就是这个声音啦'); }catch(e2){}
+      paintVoicePanel();
+      play();
+      return;
+    }
+    b.textContent = '⏳';
+    try{
+      if(hwCurAudio){ try{ hwCurAudio.pause(); }catch(e2){} }
+      const url = await hwCloudAudition(vid);
+      b.textContent = '▶️';
+      if(url) await hwPlayAudioUrl(url, 1);
+      else { b.textContent = '❌'; setTimeout(()=>{ b.textContent = '▶️'; }, 1200); }
+    }catch(e2){ b.textContent = '▶️'; }
+  };
   paintVoice();
   ask(true);   // 首词同步播：挂在用户点击手势调用栈内，解锁 iOS/平板 TTS
 }
