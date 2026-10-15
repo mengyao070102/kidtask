@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609221" />
+<meta name="build-version" content="202609222" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14393,6 +14393,39 @@ let hwCloudDead = false;   // 云端一次失败即拉黑（本次会话不再�
 let hwCurAudio = null;
 const hwCloudCache = {};
 function hwCloudVoiceId(){ return HW_CLOUD_TTS_MODEL + ':' + hwCloudVoiceCur(); }
+/* 修复云端 wav 三件事：① 服务端是流式头，时长字段是占位大数 → 按实际字节修正；② 末尾补 0.4s 静音，收尾不突兀；③ 最后 60ms 线性淡出防爆音 */
+function hwWavFix(buf){
+  try{
+    const dv = new DataView(buf);
+    if(buf.byteLength < 44 || dv.getUint32(0, true) !== 0x46464952) return buf;   // 非 RIFF 原样返回
+    let off = 12, fmtOff = -1, dataOff = -1;
+    while(off + 8 <= buf.byteLength){
+      const id = dv.getUint32(off, true), sz = dv.getUint32(off + 4, true);
+      if(id === 0x20746D66) fmtOff = off + 8;                                     // 'fmt '
+      else if(id === 0x61746164){ dataOff = off + 8; break; }                     // 'data'
+      off += 8 + sz + (sz % 2);
+    }
+    if(fmtOff < 0 || dataOff < 0) return buf;
+    const numCh = dv.getUint16(fmtOff + 2, true);
+    const sr = dv.getUint32(fmtOff + 4, true);
+    const bits = dv.getUint16(fmtOff + 14, true);
+    if(bits !== 16 || numCh < 1 || sr < 8000) return buf;
+    const dataLen = buf.byteLength - dataOff;                                     // 实际数据长度（头里写的是假的）
+    const totalSamples = Math.floor(dataLen / 2);                                 // 16bit：每样本2字节（含声道）
+    const fadeN = Math.min(Math.floor(sr * 0.06) * numCh, totalSamples);
+    for(let i = 0; i < fadeN; i++){                                               // 末尾 60ms 淡出
+      const p = dataOff + (totalSamples - fadeN + i) * 2;
+      dv.setInt16(p, Math.round(dv.getInt16(p, true) * (1 - i / fadeN)), true);
+    }
+    const silLen = Math.floor(sr * 0.4) * numCh * 2;                              // 0.4s 静音垫尾
+    const out = new Uint8Array(buf.byteLength + silLen);
+    out.set(new Uint8Array(buf), 0);
+    const odv = new DataView(out.buffer);
+    odv.setUint32(dataOff - 4, dataLen + silLen, true);                           // 修正 data 块长度
+    odv.setUint32(4, 36 + dataLen + silLen, true);                                // 修正 RIFF 总长
+    return out.buffer;
+  }catch(e){ return buf; }
+}
 async function hwCloudTts(text, en){
   if(hwCloudDead) return null;
   const key = (en ? 'E|' : 'C|') + hwCloudVoiceCur() + '|' + String(text);
@@ -14406,7 +14439,7 @@ async function hwCloudTts(text, en){
     const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'wav', sample_rate: 44100, speed: 0.8 }),   // wav 无损（部分浏览器 mp3 解码会丢最后一帧=词尾被掐）+ 高采样率 44.1kHz + 放慢语速 + 补尾标点
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'wav', speed: 0.8 }),   // wav 无损 + 服务端默认采样率（实测传 44100 采样率参数会让输出截短 1/3=词尾被掐，勿加）+ 放慢语速 + 补尾标点
       signal: ctrl ? ctrl.signal : undefined
     });
     if(to) clearTimeout(to);
@@ -14414,10 +14447,10 @@ async function hwCloudTts(text, en){
     if(!res.ok){ hwCloudDead = true; return null; }
     const blob = await res.blob();
     if(!blob || blob.size < 500){ hwCloudDead = true; return null; }   // 太小说明不是有效音频
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([hwWavFix(await blob.arrayBuffer())], { type: 'audio/wav' }));
     hwCloudCache[key] = url;                    // 同词同声音复用，第二次播放零延迟
     const ks = Object.keys(hwCloudCache);
-    if(ks.length > 120){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
+    if(ks.length > 60){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
     return url;
   }catch(e){ if(to) clearTimeout(to); hwCloudBusy = false; hwCloudDead = true; return null; }
 }
@@ -14431,12 +14464,12 @@ async function hwCloudAudition(vid){
     const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad('请把这个词写在纸上', false), voice: HW_CLOUD_TTS_MODEL + ':' + vid, response_format: 'wav', sample_rate: 44100, speed: 0.8 })
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad('请把这个词写在纸上', false), voice: HW_CLOUD_TTS_MODEL + ':' + vid, response_format: 'wav', speed: 0.8 })
     });
     if(!res.ok) return null;
     const blob = await res.blob();
     if(!blob || blob.size < 500) return null;
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([hwWavFix(await blob.arrayBuffer())], { type: 'audio/wav' }));
     hwAudCache[vid] = url;
     return url;
   }catch(e){ return null; }
