@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609220" />
+<meta name="build-version" content="202609221" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14406,7 +14406,7 @@ async function hwCloudTts(text, en){
     const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'mp3', sample_rate: 44100, speed: 0.8 }),   // 高采样率 44.1kHz（默认 32k 是发闷主因）+ 放慢语速 + 补尾标点
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'wav', sample_rate: 44100, speed: 0.8 }),   // wav 无损（部分浏览器 mp3 解码会丢最后一帧=词尾被掐）+ 高采样率 44.1kHz + 放慢语速 + 补尾标点
       signal: ctrl ? ctrl.signal : undefined
     });
     if(to) clearTimeout(to);
@@ -14431,7 +14431,7 @@ async function hwCloudAudition(vid){
     const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad('请把这个词写在纸上', false), voice: HW_CLOUD_TTS_MODEL + ':' + vid, response_format: 'mp3', sample_rate: 44100, speed: 0.8 })
+      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad('请把这个词写在纸上', false), voice: HW_CLOUD_TTS_MODEL + ':' + vid, response_format: 'wav', sample_rate: 44100, speed: 0.8 })
     });
     if(!res.ok) return null;
     const blob = await res.blob();
