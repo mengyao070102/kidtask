@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609228" />
+<meta name="build-version" content="202609229" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -15041,8 +15041,10 @@ function bindSyncUI(){
 /* 手动同步：先上传本地最新状态，再请求其他设备发来它们的最新状态。
    家长端需先弹确认再同步（避免误触把孩子端数据合并进来）；孩子端直接同步，不打断孩子操作。 */
 function doManualSync(){
-  if(!syncConnected || !mqttClient){
-    showToast('还没连上同步，请稍候或检查网络～');
+  if(!syncConnected || !mqttClient || !mqttClient.connected){
+    /* 断开状态下点同步 = 主动重建连接（原来只提示「稍候」，用户会永远卡在「已断开」） */
+    showToast('📶 同步已断开，正在重新连接…连上后会自动同步');
+    try { syncForceRebuild(); } catch(e){}
     return;
   }
   if(deviceRole !== 'child'){          // 家长端（含未设定角色的设备）：先确认
@@ -15644,6 +15646,16 @@ function connectSync(){
           }
         }, 2000);
         setInterval(()=>{ if(syncConnected){ try { requestState(); } catch(e){} try { pushSync(true); } catch(e){} } }, 180000);   // 周期对账：拉最新 + 补推本机（修复「合并窗口内创建的内容被丢弃后无人补发」）
+        /* 断线自动救援：mqtt.js 自带 5 秒重连，但 iOS 长时间冻结后重连循环可能卡死、或重连一直失败，
+           页面可见却停在「已断开」超过 20 秒 → 强制重建（带 15 秒冷却，与探针看门狗共用 syncRebuildAt） */
+        setInterval(()=>{
+          try{
+            if(document.hidden) return;                       // 后台不折腾，回前台由 syncOnVisChange 处理
+            if(lastSyncState && lastSyncState.state !== 'off') return;
+            if(mqttClient && mqttClient.connected) return;
+            if(Date.now() - syncRebuildAt > 15000){ syncForceRebuild(); }
+          }catch(e){}
+        }, 10000);
       }
     } catch(e){ setSyncStatus('off', '同步不可用'); }
   });
