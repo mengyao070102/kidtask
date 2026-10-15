@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609227" />
+<meta name="build-version" content="202609228" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -4452,7 +4452,15 @@ function renderHome(){
   summary.innerHTML = `全部 <b id="badgeAll">0</b> · 已完成 <b id="badgeDone">0</b> · 待处理 <b id="badgePending">0</b>`;
   tl.appendChild(summary);
   if(tdTotal===0){
-    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty', innerHTML:'<span class="big">🗒️</span>今天还没有任务哦，去「家长审核」让爸爸妈妈加一个吧～'}));
+    let emptyMsg = '<span class="big">🗒️</span>今天还没有任务哦，去「家长审核」让爸爸妈妈加一个吧～';
+    const _fc = familyCode || getFamilyCode();
+    if(!tasks.length && !_fc){
+      /* 小米等手机浏览器/系统管家清理会连家庭码一起清掉：本机全空且无家庭码时，给出可操作的找回路径 */
+      emptyMsg = '<span class="big">📥</span>本机暂无任务数据。<br>如果是常用的设备，数据可能被浏览器清理了——用家人分享的<b>邀请链接</b>重新打开本页加入家庭，即可自动找回全部任务和积分。';
+    } else if(tasks.length){
+      emptyMsg += '<div style="font-size:12px;color:#999;margin-top:8px;line-height:1.6;">本机共 '+tasks.length+' 项任务（今天：'+esc(today.label)+'）。如果其他设备今天显示有任务而这台没有，请检查：① 这台手机的系统日期时间是否准确；② 首页底部「多设备同步」的指示灯是否为绿色。</div>';
+    }
+    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty', innerHTML:emptyMsg}));
   } else {
     const board = document.createElement('div');
     board.className = 'task-board';
@@ -15691,6 +15699,46 @@ try { if(!tasks.length && familyCode){ render(); } } catch(e){}   /* 空数据�
 /* 侧边栏「服务状态」指示灯：每 15 秒自动探测一次，离线时点击可查看启动方法 */
 checkBackend();
 setInterval(checkBackend, 15000);
+/* 手机时间校验：对比页面服务器的 Date 响应头与本地时钟，偏差大则提示。
+   系统日期错是「其他端有任务、这台手机今日任务显示空」的常见原因（日期不匹配就匹配不到任何任务）。 */
+(function(){
+  try{
+    var _t0 = Date.now();
+    fetch(location.pathname + '?__tcheck=' + _t0, { method:'HEAD', cache:'no-store' }).then(function(r){
+      try{
+        var _d = r.headers && r.headers.get && r.headers.get('date'); if(!_d) return;
+        var _srv = new Date(_d).getTime(); if(!_srv || isNaN(_srv)) return;
+        var _rtt = Date.now() - _t0;
+        var _skew = Math.abs(_srv + _rtt/2 - _t0);
+        if(_skew > 15*60*1000){
+          setTimeout(function(){ try{ showToast('⚠️ 这台手机的日期时间似乎不准（与网络时间相差约 '+Math.max(1,Math.round(_skew/60000))+' 分钟），可能导致「今日任务」显示异常，请校准系统时间'); }catch(e){} }, 1800);
+        }
+      }catch(e){}
+    }).catch(function(){});
+  }catch(e){}
+})();
+/* 本地存储可用性探测（无痕模式/浏览器禁存储）：数据保存不了会让本机永远「空」，早发现早提示 */
+(function(){
+  var _bad = false;
+  try{
+    var _tk = 'kidtask_probe_v1';
+    localStorage.setItem(_tk, '1');
+    _bad = localStorage.getItem(_tk) !== '1';
+    try{ localStorage.removeItem(_tk); }catch(e){}
+  }catch(e){ _bad = true; }
+  if(_bad){
+    setTimeout(function(){ try{ showToast('⚠️ 当前浏览器处于无痕/隐私模式或已禁止本地存储，任务数据无法保存，请用正常模式打开'); }catch(e){} }, 1200);
+  }
+})();
+/* 跨天自动刷新：页面在后台挂过夜（小米等浏览器会冻结后台页面），日期变了必须重绘，
+   否则「今日任务」一直停留在昨天那一页，看起来就像任务丢了/是空的 */
+let _bootDay = fmtISO(new Date());
+function _onDayRollover(){
+  const _d = fmtISO(new Date());
+  if(_d !== _bootDay){ _bootDay = _d; try{ render(); }catch(e){} }
+}
+setInterval(_onDayRollover, 60000);
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) _onDayRollover(); });
 
 /* 设置大模型密钥：弹窗让用户输入 SiliconFlow Key，存到当前浏览器 localStorage（不写代码、不上传） */
 function showKeyModal(){
