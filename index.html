@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609229" />
+<meta name="build-version" content="202609230" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14266,7 +14266,8 @@ async function hwEditorSave(saveBtn){
   saveHW();
   hwEditLoad(hwEdit.date);
   renderHwEditor();
-  try { showToast('✅ 校内作业已保存并同步'); } catch(e){}
+  const _hwSent = syncConnected && mqttClient && mqttClient.connected;
+  try { showToast(_hwSent ? '✅ 校内作业已保存，正在同步给全家' : '✅ 校内作业已保存（当前离线，连上同步后自动送达其他设备）'); } catch(e){}
   if(page==='home') render();
 }
 function bindHwEditor(){
@@ -15238,8 +15239,20 @@ function pushSync(force){
     pushTimer = null;
     if(!syncConnected || !mqttClient || !mqttClient.connected || syncing){ syncDirty = true; return; }   // mqttClient.connected 实测活性：僵尸连接（iOS 冻结后假在线）不往死管道发，但记为待发
     try {
-      mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true });   // QoS1：至少一次送达（库在 PUBACK 前自动重传），配合重连补推防 WiFi 抖动丢消息
+      /* PUBACK 回执感知：往死管道（假在线）publish 不抛错也清不了问题——消息静默消失且 syncDirty 已被清，
+         内容就此丢失（iOS 上「创建的校内作业/任务其他端看不到」的残留盲区）。
+         QoS1 必须等 broker 的 PUBACK 回执：8 秒无回执 = 管道已死 → 重新记脏并强制重建连接。 */
+      let _acked = false;
+      mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true }, function(err){
+        _acked = true;
+        if(err){ syncDirty = true; }   // broker 明确拒绝：保留待发标记
+      });
       syncDirty = false;   // 全量快照已发出，本机编辑已覆盖，清脏标记
+      setTimeout(function(){
+        if(_acked) return;
+        syncDirty = true;   // 无回执 → 编辑没真正出去，重新记脏
+        try { if(!document.hidden && Date.now() - syncRebuildAt > 15000) syncForceRebuild(); } catch(e){}
+      }, 8000);
     }
     catch(e){ syncDirty = true; setTimeout(()=>{ if(syncConnected) pushSync(true); }, 2000); } // 发布异常则 2 秒后补推
   };
