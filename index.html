@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609222" />
+<meta name="build-version" content="202609223" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14426,50 +14426,79 @@ function hwWavFix(buf){
     return out.buffer;
   }catch(e){ return buf; }
 }
+/* 解析 wav 实际时长（秒）：服务端是流式头，头里的时长字段是假的，按 data 块实际字节算 */
+function hwWavSec(buf){
+  try{
+    const dv = new DataView(buf);
+    if(buf.byteLength < 44 || dv.getUint32(0, true) !== 0x46464952) return 0;
+    let off = 12, fmtOff = -1, dataOff = -1;
+    while(off + 8 <= buf.byteLength){
+      const id = dv.getUint32(off, true), sz = dv.getUint32(off + 4, true);
+      if(id === 0x20746D66) fmtOff = off + 8;                                     // 'fmt '
+      else if(id === 0x61746164){ dataOff = off + 8; break; }                     // 'data'
+      off += 8 + sz + (sz % 2);
+    }
+    if(fmtOff < 0 || dataOff < 0) return 0;
+    const numCh = dv.getUint16(fmtOff + 2, true);
+    const sr = dv.getUint32(fmtOff + 4, true);
+    const bits = dv.getUint16(fmtOff + 14, true);
+    if(bits !== 16 || numCh < 1 || sr < 8000) return 0;
+    return (buf.byteLength - dataOff) / (sr * numCh * 2);
+  }catch(e){ return 0; }
+}
+/* 云端合成核心（带质检重试）：服务端会随机截断输出（实测同词两次 0.35s vs 1.09s），
+   所以每次合成后按字数算出「至少该多长」，不合格自动重试，最多 3 次取最长的一条 */
+async function hwCloudFetchTts(input, voiceId, en){
+  const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
+  if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return { err: 'nokey' };
+  const chars = String(input).replace(/[\s。，、,.!?！？]/g, '').length || 1;
+  const needMs = en ? chars * 80 + 150 : chars * 200 + 100;   // 合格下限：中文 0.2s/字、英文 0.08s/字（留余量）
+  const ctrl = ('AbortController' in window) ? new AbortController() : null;
+  const to = ctrl ? setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, 4500) : null;
+  let best = null;
+  try{
+    for(let i = 0; i < 3; i++){
+      const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
+        body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: input, voice: voiceId, response_format: 'wav', speed: 0.8 }),   // wav 无损 + 服务端默认采样率（实测传 44100 采样率参数会让输出截短 1/3=词尾被掐，勿加）
+        signal: ctrl ? ctrl.signal : undefined
+      });
+      if(!res.ok){ return { err: 'http' }; }
+      const ab = await res.arrayBuffer();
+      const dur = hwWavSec(ab);
+      if(!best || dur > best.dur) best = { ab: ab, dur: dur };
+      if(best.dur * 1000 >= needMs) break;   // 时长达标，收工
+    }
+  }catch(e){ /* 超时/网络错：用手头最好的一条 */ }
+  if(to) clearTimeout(to);
+  if(!best || best.ab.byteLength < 500) return { err: 'http' };   // 太小说明不是有效音频
+  return { buf: hwWavFix(best.ab) };
+}
 async function hwCloudTts(text, en){
   if(hwCloudDead) return null;
   const key = (en ? 'E|' : 'C|') + hwCloudVoiceCur() + '|' + String(text);
   if(hwCloudCache[key]) return hwCloudCache[key];
-  const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
-  if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return null;
   hwCloudBusy = true;
-  const ctrl = ('AbortController' in window) ? new AbortController() : null;
-  const to = ctrl ? setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, 4500) : null;
+  const r = await hwCloudFetchTts(hwTtsPad(String(text).slice(0, 118), en), hwCloudVoiceId(), en);
+  hwCloudBusy = false;
+  if(!r || r.err){ hwCloudDead = true; return null; }
   try{
-    const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad(String(text).slice(0, 118), en), voice: hwCloudVoiceId(), response_format: 'wav', speed: 0.8 }),   // wav 无损 + 服务端默认采样率（实测传 44100 采样率参数会让输出截短 1/3=词尾被掐，勿加）+ 放慢语速 + 补尾标点
-      signal: ctrl ? ctrl.signal : undefined
-    });
-    if(to) clearTimeout(to);
-    hwCloudBusy = false;
-    if(!res.ok){ hwCloudDead = true; return null; }
-    const blob = await res.blob();
-    if(!blob || blob.size < 500){ hwCloudDead = true; return null; }   // 太小说明不是有效音频
-    const url = URL.createObjectURL(new Blob([hwWavFix(await blob.arrayBuffer())], { type: 'audio/wav' }));
+    const url = URL.createObjectURL(new Blob([r.buf], { type: 'audio/wav' }));
     hwCloudCache[key] = url;                    // 同词同声音复用，第二次播放零延迟
     const ks = Object.keys(hwCloudCache);
     if(ks.length > 60){ try{ URL.revokeObjectURL(hwCloudCache[ks[0]]); }catch(e){} delete hwCloudCache[ks[0]]; }
     return url;
-  }catch(e){ if(to) clearTimeout(to); hwCloudBusy = false; hwCloudDead = true; return null; }
+  }catch(e){ hwCloudDead = true; return null; }
 }
 /* 试音面板：指定音色合成一句示例并返回音频地址（不受云端拉黑影响，结果缓存） */
 const hwAudCache = {};
 async function hwCloudAudition(vid){
   if(hwAudCache[vid]) return hwAudCache[vid];
+  const r = await hwCloudFetchTts(hwTtsPad('请把这个词写在纸上', false), HW_CLOUD_TTS_MODEL + ':' + vid, false);
+  if(!r || r.err) return null;
   try{
-    const k = (typeof getLLMKey === 'function') ? getLLMKey() : '';
-    if(!k || k.indexOf('sk-') !== 0 || !window.fetch) return null;
-    const res = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + k },
-      body: JSON.stringify({ model: HW_CLOUD_TTS_MODEL, input: hwTtsPad('请把这个词写在纸上', false), voice: HW_CLOUD_TTS_MODEL + ':' + vid, response_format: 'wav', speed: 0.8 })
-    });
-    if(!res.ok) return null;
-    const blob = await res.blob();
-    if(!blob || blob.size < 500) return null;
-    const url = URL.createObjectURL(new Blob([hwWavFix(await blob.arrayBuffer())], { type: 'audio/wav' }));
+    const url = URL.createObjectURL(new Blob([r.buf], { type: 'audio/wav' }));
     hwAudCache[vid] = url;
     return url;
   }catch(e){ return null; }
