@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609230" />
+<meta name="build-version" content="202609231" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -4607,6 +4607,7 @@ function loadKnowledgeCache(){ try{ const o=JSON.parse(localStorage.getItem(KNOW
 function saveKnowledgeCache(item, online, type){ try{ localStorage.setItem(KNOWLEDGE_KEY, JSON.stringify({ date: todayInfo().iso, type: type||'science', item, online: !!online })); }catch(e){} }
 function loadKnowRead(){ try{ return JSON.parse(localStorage.getItem(KNOWLEDGE_READ_KEY)) || {}; }catch(e){ return {}; } }
 function saveKnowRead(o){ try{ localStorage.setItem(KNOWLEDGE_READ_KEY, JSON.stringify(o)); }catch(e){} pushSync(); }
+function saveKnowReadSilent(o){ try{ localStorage.setItem(KNOWLEDGE_READ_KEY, JSON.stringify(o)); }catch(e){} }
 function knowReadToday(){ const r=loadKnowRead(); return !!r[todayInfo().iso]; }
 function markKnowRead(){ const r=loadKnowRead(); r[todayInfo().iso]=Date.now(); saveKnowRead(r); }
 
@@ -12877,7 +12878,7 @@ function renderTimetable(){
   if(syncBtn) syncBtn.onclick = ()=>{
     markTTEdited(); touchTimetableTs();   // 保险：确保本端 ttTs 权威且为最新（重复编辑也无害）
     try{ localStorage.setItem(TT_KEY, JSON.stringify(timetable)); }catch(e){}
-    if(!syncConnected || !mqttClient){
+    if(!syncConnected || !syncAnyUp()){
       try{ connectSync(); }catch(e){}
       try{ showToast('⚠️ 当前同步未连接，课表已存本机；已尝试重连，连上后会自动补发'); }catch(e){}
       return;
@@ -13206,7 +13207,7 @@ function menuEditPopup(off){
   ov.querySelector('#meSync').onclick = ()=>{
     applyDraft();
     saveMenu();   // 落盘 + touchMenuTs + 常规 pushSync（自动刷新首页卡片）
-    if(!syncConnected || !mqttClient){
+    if(!syncConnected || !syncAnyUp()){
       try{ connectSync(); }catch(e){}
       try{ showToast('⚠️ 当前同步未连接，菜谱已存本机；已尝试重连，连上后会自动补发'); }catch(e){}
       return;
@@ -14266,7 +14267,7 @@ async function hwEditorSave(saveBtn){
   saveHW();
   hwEditLoad(hwEdit.date);
   renderHwEditor();
-  const _hwSent = syncConnected && mqttClient && mqttClient.connected;
+  const _hwSent = syncConnected && syncAnyUp();
   try { showToast(_hwSent ? '✅ 校内作业已保存，正在同步给全家' : '✅ 校内作业已保存（当前离线，连上同步后自动送达其他设备）'); } catch(e){}
   if(page==='home') render();
 }
@@ -14546,7 +14547,7 @@ function bindDiag(){
   renderDiag();
   const drf = document.getElementById('diagRefetch');
   if(drf) drf.onclick = ()=>{
-    if(!syncConnected || !mqttClient){ showToast('还没连上同步，请稍候或检查网络～'); return; }
+    if(!syncConnected || !syncAnyUp()){ showToast('还没连上同步，请稍候或检查网络～'); return; }
     setSyncStatus('pending','同步中…');
     try { pushSync(true); } catch(e){}
     try { requestState(); } catch(e){}
@@ -14913,7 +14914,7 @@ function reject(rid){
    - 任一设备状态变化后把「完整共享状态」发布到 topic（last-write-wins，按 ts 比较）。
    - 新设备上线后发送 request，在线其他设备回应最新状态，实现冷加入同步。
    - 网络不可达 / 库加载失败 时自动降级为纯本地，不影响任何功能。 */
-const SYNC_BROKER = 'wss://broker.emqx.io:8084/mqtt';
+const SYNC_BROKERS = ['wss://broker-cn.emqx.io:8084/mqtt', 'wss://broker.emqx.io:8084/mqtt'];   // 双线路容灾：大陆优化线 + 全球线，同时在线（v202609231，消灭公共 broker 单点）
 let mqttClient = null;
 let syncConnected = false;
 let syncing = false;            // 正在应用远端状态，期间抑制本地回推，避免回声循环
@@ -15042,7 +15043,7 @@ function bindSyncUI(){
 /* 手动同步：先上传本地最新状态，再请求其他设备发来它们的最新状态。
    家长端需先弹确认再同步（避免误触把孩子端数据合并进来）；孩子端直接同步，不打断孩子操作。 */
 function doManualSync(){
-  if(!syncConnected || !mqttClient || !mqttClient.connected){
+  if(!syncConnected || !syncAnyUp()){
     /* 断开状态下点同步 = 主动重建连接（原来只提示「稍候」，用户会永远卡在「已断开」） */
     showToast('📶 同步已断开，正在重新连接…连上后会自动同步');
     try { syncForceRebuild(); } catch(e){}
@@ -15232,25 +15233,46 @@ function buildSyncPayload(){
    在管道恢复通畅的任何时刻（收到任何消息 / 周期对账 / 远端合并完成 / 切后台冲刷）自动补推。
    没有它，iOS 在这些窗口创建的内容会被静默丢弃且永远不再发送（其他端看不到）。 */
 let syncDirty = false;
+/* 双线路连接池与发送助手：任一线活着就算在线；发布按线循环，对端按发送方 ts 幂等去重，重复消息无害 */
+let syncClients = [];   // [{ url, client, up }]，由 connectSync 填充；up 由 connect/error/close 事件维护
+function syncAnyUp(){ return syncClients.some(c => c.up && c.client); }
+function syncPublishAll(topic, payload, opts){
+  let n = 0;
+  syncClients.forEach(c => {
+    try { if(c.up && c.client){ c.client.publish(topic, payload, opts || { qos: 1 }, function(err){}); n++; } } catch(e){}
+  });
+  return n;
+}
 function pushSync(force){
   if(syncing){ syncDirty = true; return; }                       // 应用远端中：标记待发，合并完成自动补推
-  if(!syncConnected || !mqttClient){ syncDirty = true; return; } // 未连接：标记待发，连上自动补推（connect 回调有全量补推）
+  if(!syncConnected || !syncAnyUp()){ syncDirty = true; return; } // 未连接：标记待发，连上自动补推（connect 回调有全量补推）
   const send = ()=>{
     pushTimer = null;
-    if(!syncConnected || !mqttClient || !mqttClient.connected || syncing){ syncDirty = true; return; }   // mqttClient.connected 实测活性：僵尸连接（iOS 冻结后假在线）不往死管道发，但记为待发
+    if(!syncConnected || !syncAnyUp() || syncing){ syncDirty = true; return; }   // 实测活线：僵尸连接（iOS 冻结后假在线）不往死管道发，但记为待发
     try {
       /* PUBACK 回执感知：往死管道（假在线）publish 不抛错也清不了问题——消息静默消失且 syncDirty 已被清，
          内容就此丢失（iOS 上「创建的校内作业/任务其他端看不到」的残留盲区）。
-         QoS1 必须等 broker 的 PUBACK 回执：8 秒无回执 = 管道已死 → 重新记脏并强制重建连接。 */
-      let _acked = false;
-      mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true }, function(err){
-        _acked = true;
-        if(err){ syncDirty = true; }   // broker 明确拒绝：保留待发标记
+         QoS1 必须等 broker 的 PUBACK 回执：8 秒无任何一线回执 = 管道已死 → 重新记脏并强制重建连接。
+         双线同发：任一线回执到达即算成功；某一线报错则保守重记脏（下轮全量快照重发，幂等无害）。 */
+      let _acked = false, _errSeen = false;
+      const _payload = buildSyncPayload();
+      let _pending = 0;
+      syncClients.forEach(c => {
+        try {
+          if(c.up && c.client){
+            _pending++;
+            c.client.publish(syncTopic(), _payload, { qos: 1, retain: true }, function(err){
+              _acked = true;
+              if(err) _errSeen = true;
+            });
+          }
+        } catch(e){ _errSeen = true; }
       });
+      if(_pending === 0){ syncDirty = true; return; }   // 没有任何活线（竞态窗口）
       syncDirty = false;   // 全量快照已发出，本机编辑已覆盖，清脏标记
       setTimeout(function(){
-        if(_acked) return;
-        syncDirty = true;   // 无回执 → 编辑没真正出去，重新记脏
+        if(_acked && !_errSeen) return;
+        syncDirty = true;   // 无回执 / 有错误回执 → 编辑未确认送达，重新记脏
         try { if(!document.hidden && Date.now() - syncRebuildAt > 15000) syncForceRebuild(); } catch(e){}
       }, 8000);
     }
@@ -15261,8 +15283,8 @@ function pushSync(force){
 }
 
 function requestState(){
-  if(!syncConnected || !mqttClient) return;
-  try { mqttClient.publish(syncCtrlTopic(), JSON.stringify({ type:'request', senderId, ts: Date.now() }), { qos: 1 }); } catch(e){}
+  if(!syncConnected || !syncAnyUp()) return;
+  try { syncPublishAll(syncCtrlTopic(), JSON.stringify({ type:'request', senderId, ts: Date.now() }), { qos: 1 }); } catch(e){}
 }
 
 function handleSyncMessage(topic, payload){
@@ -15290,8 +15312,8 @@ function publishChildEvent(ev){
   const id = senderId + '-' + bumpSyncTs() + '-' + Math.random().toString(36).slice(2,5);
   const msg = { type:'cevt', src:'child', id, ts: logicalTs, ev };
   mergeChildEvents([msg]);                            // 本地先留存：断网也不丢，之后随 sync 通道补推给家长端
-  if(!syncConnected || !mqttClient) return;
-  try { mqttClient.publish(evtTopic(), JSON.stringify(msg), { qos:1 }); } catch(e){}
+  if(!syncConnected || !syncAnyUp()) return;
+  try { syncPublishAll(evtTopic(), JSON.stringify(msg), { qos:1 }); } catch(e){}
 }
 function handleChildEvent(payload){
   let obj;
@@ -15382,7 +15404,10 @@ function applySyncState(obj){
       }
       tasks = Object.keys(byId).map(id => Object.assign({ timed:false, timerStartAt:null, elapsed:0 }, byId[id]));
       deriveAllTasks();                                                        // 合并后统一派生，保证三端状态与积分口径一致
-      save();
+      /* ⚠️ 这里只落盘、不走 save()（save 内含 pushSync）：应用远端期间任何 pushSync 都会置脏，
+         合并结束的补冲刷会把刚收到的快照原样回推 → 设备间乒乓（每条消息 N 倍流量放大，
+         公共 broker 高频大包限流踢线 → iOS 同步灯频繁「已断开」）。回推仅由本机真实编辑触发。 */
+      try{ localStorage.setItem(KEY, JSON.stringify(tasks)); }catch(e){}
       // 冲突提示：仅在首次合并之后（避免首连刷屏）才弹，告知家长哪些本地编辑被对端较新修改覆盖
       if(syncFirstApplied && syncConflicts.length){
         const names = syncConflicts.slice(0,2).map(c=> '「'+c.title+'」的'+c.fields.map(f=>SYNC_FIELD_LABEL[f]||f).join('/')).join('、');
@@ -15393,10 +15418,14 @@ function applySyncState(obj){
     /* 手动积分/星星调整：流水 extraLog 按 id 并集同步，余额由流水重算 → 多端不丢、不重复计 */
     if(Array.isArray(obj.extraLog)){
       const seen = new Set(extraLog.map(r=>String(r&&r.id)));
-      obj.extraLog.forEach(r=>{ if(r && r.id && !seen.has(String(r.id))){ extraLog.push(r); seen.add(String(r.id)); } });
+      let _added = 0;
+      obj.extraLog.forEach(r=>{ if(r && r.id && !seen.has(String(r.id))){ extraLog.push(r); seen.add(String(r.id)); _added++; } });
       if(extraLog.length>1000) extraLog = extraLog.slice(-1000);
       saveExtraLog();
-      recomputeExtra(); saveExtra();
+      /* ⚠️ 只在真有新流水时才重算+落盘：saveExtra 内部会 pushSync——无条件调用会造成
+         「收到一份远端快照就置脏回推一份全量快照」的设备间乒乓（流量 N 倍放大，
+         公共 broker 高频大包被限流踢线 → iOS 同步灯频繁「已断开」的深层帮凶） */
+      if(_added){ recomputeExtra(); saveExtra(); }
     } else if(obj.extra && typeof obj.extra === 'object'){
       /* 旧版远端仅发总额：过渡期回退 last-write-wins（同链接部署后基本不会触发）。
          直接落地余额，绕过 recompute，避免被空流水重算成 0 */
@@ -15507,7 +15536,7 @@ function applySyncState(obj){
       redeemed.forEach(r=>{ if(r && r.rid) map[String(r.rid)] = r.status ? r : Object.assign({status:'approved'}, r); });
       obj.redeemed.forEach(r=>{ if(r && r.rid) map[String(r.rid)] = r.status ? r : Object.assign({status:'approved'}, r); });
       redeemed = Object.keys(map).map(k=>map[k]);
-      saveR();
+      try{ localStorage.setItem(RKEY, JSON.stringify(redeemed)); }catch(e){}   // 应用远端只落盘不回推（saveR 内含 pushSync，会置脏引发乒乓）
     }
     /* ===== 历史 / 累积数据：多端合并（并集 / 取较大），不互相覆盖 ===== */
     if(Array.isArray(obj.challenges)){                    // 亲子挑战：按 id 并集，孩子进度取较大（不回退）
@@ -15523,14 +15552,14 @@ function applySyncState(obj){
         });
       }
       challenges = Object.keys(byId).map(k=>byId[k]);
-      saveChals();
+      try{ localStorage.setItem(CHAL_KEY, JSON.stringify(challenges)); }catch(e){}   // 应用远端只落盘不回推（saveChals 内含 pushSync）
     }
     if(Array.isArray(obj.rewardDefs)){                    // 奖励定义（家长配置）：按 id 并集
       const byId = {};
       for(const r of rewardDefs) if(r && r.id) byId[String(r.id)] = r;
       for(const rr of obj.rewardDefs) if(rr && rr.id && !byId[String(rr.id)]) byId[String(rr.id)] = rr;
       rewardDefs = Object.keys(byId).map(k=>byId[k]);
-      saveRewardDefs();
+      try{ localStorage.setItem(RDEF_KEY, JSON.stringify(rewardDefs)); }catch(e){}   // 应用远端只落盘不回推（saveRewardDefs 内含 pushSync）
     }
     if(obj.mathRec && typeof obj.mathRec === 'object'){   // 数学学习记录：历史成绩取较大，不回退
       const lm = mathRec || {}, rm = obj.mathRec;
@@ -15547,14 +15576,14 @@ function applySyncState(obj){
         const v = Number(obj.knowRead[d])||0;
         if(!r[d] || Number(r[d]) < v) r[d] = v;
       }
-      saveKnowRead(r);
+      saveKnowReadSilent(r);   // 应用远端只落盘不回推（saveKnowRead 内含 pushSync）
     }
     if(Array.isArray(obj.bookList)){                      // 绘本作品：按 id(无则 title) 并集，保留孩子全部创作
       const byKey = {}, keyOf = b => String((b && (b.id || b.title)) || '');
       for(const b of bookList){ const k = keyOf(b); if(k) byKey[k] = b; }
       for(const rb of obj.bookList){ const k = keyOf(rb); if(k && !byKey[k]) byKey[k] = rb; }
       bookList = Object.keys(byKey).map(k=>byKey[k]);
-      saveBooks();
+      try{ localStorage.setItem(BOOK_KEY, JSON.stringify(bookList)); }catch(e){}   // 应用远端只落盘不回推（saveBooks 内含 pushSync）
     }
     if(obj.storyData && typeof obj.storyData === 'object'){ // 睡前故事：本端无或换了新故事才采用远端
       if(!storyData || (obj.storyData.title && obj.storyData.title !== storyData.title)){ storyData = obj.storyData; saveStory(); }
@@ -15567,7 +15596,7 @@ function applySyncState(obj){
   }
   syncing = false;
   syncFirstApplied = true;   // 标记已完成至少一次与 peer 的合并，之后出现的编辑冲突才提示
-  try{ if(syncDirty && syncConnected && mqttClient && mqttClient.connected) pushSync(true); }catch(e){}   // 合并窗口内产生/标记的本机编辑，现在补发
+  try{ if(syncDirty && syncConnected && syncAnyUp()) pushSync(true); }catch(e){}   // 合并窗口内产生/标记的本机编辑，现在补发
 }
 
 /* iOS 生命周期处理（苹果手机编辑后不同步的根因修复）：
@@ -15588,17 +15617,18 @@ function syncForceRebuild(){
   syncConnected = false;
   syncProbePending = false;
   syncRebuildAt = Date.now();
-  try{ if(mqttClient) mqttClient.end(true); }catch(e){}
+  syncClients.forEach(c => { try{ if(c.client) c.client.end(true); }catch(e){} });
+  syncClients = [];
   mqttClient = null;
   try{ connectSync(); }catch(e){}
 }
 function syncFlushPending(){
   try{
-    if(!syncConnected || !mqttClient || !mqttClient.connected || syncing) return;
+    if(!syncConnected || !syncAnyUp() || syncing) return;
     const hasPending = !!pushTimer || syncDirty;   // 防抖中有编辑 或 有未发出的待发编辑
     if(pushTimer){ clearTimeout(pushTimer); pushTimer = null; }
     if(hasPending){   // iOS 切后台/锁屏前最后的补发机会
-      mqttClient.publish(syncTopic(), buildSyncPayload(), { qos: 1, retain: true });
+      syncPublishAll(syncTopic(), buildSyncPayload(), { qos: 1, retain: true });
       syncDirty = false;
     }
   }catch(e){}
@@ -15606,8 +15636,8 @@ function syncFlushPending(){
 function syncOnVisChange(){
   if(document.hidden){ syncFlushPending(); return; }
   try{
-    if(!mqttClient){ try{ connectSync(); }catch(e){} return; }
-    if(!mqttClient.connected){   // 僵尸/断开的连接：mqtt.js 自动重连对半死 socket 不可靠，强制重建
+    if(!syncClients.length){ try{ connectSync(); }catch(e){} return; }
+    if(!syncAnyUp()){   // 所有线路都断：mqtt.js 自动重连对半死 socket 不可靠，强制整池重建
       syncForceRebuild();
       return;
     }
@@ -15626,23 +15656,37 @@ function connectSync(){
   loadMqttLib(ok=>{
     if(!ok){ setSyncStatus('off', '同步不可用'); return; }
     try {
-      const clientId = 'kidtask_' + senderId + '_' + Math.random().toString(36).slice(2, 6);
-      mqttClient = mqtt.connect(SYNC_BROKER, {
-        clientId: clientId, clean: true, reconnectPeriod: 5000, connectTimeout: 8000, keepalive: 30
+      /* 双线路同时在线：大陆优化线 + 全球线各建一条，任一通即可收发；
+         两线各发一份全量快照（retain），对端按发送方 ts 幂等去重，重复无害 */
+      syncClients = SYNC_BROKERS.map(url => ({ url, client: null, up: false }));
+      const _updateStatus = ()=>{
+        const ups = syncClients.filter(c => c.up && c.client).length;
+        syncConnected = ups > 0;
+        if(ups > 0) setSyncStatus('on', ups > 1 ? '已同步·双线' : '已同步');
+        else setSyncStatus('off', '同步已断开');
+      };
+      syncClients.forEach((entry, li) => {
+        const clientId = 'kidtask_' + senderId + '_' + li + '_' + Math.random().toString(36).slice(2, 6);
+        const mc = mqtt.connect(entry.url, {
+          clientId: clientId, clean: true, reconnectPeriod: 5000, connectTimeout: 8000, keepalive: 30
+        });
+        entry.client = mc;
+        if(li === 0) mqttClient = mc;   // 兼容旧引用（诊断面板等）
+        mc.on('connect', ()=>{
+          entry.up = true;
+          _updateStatus();
+          // 上线即拉取家庭最新状态，并把本机状态发布（retain）给之后加入的设备
+          mc.subscribe(syncBase() + '/#', { qos: 0 }, ()=>{ requestState(); pushSync(true); });  // sync/# 匹配 sync(控制) 与 sync/<senderId>(各设备快照)，晚加入者自动拿到全部 retained 快照
+          mc.subscribe(evtTopic(), { qos: 0 });   // 落地版方案B：订阅孩子端行为事件流（单向 child→parent）
+          /* 首次连接也可能是死管道（iOS 网络切换后刚恢复）：连接成功即上探针，本机自己的快照/request 回声 4 秒内未到达 → 看门狗强制重建 */
+          syncProbePending = true; syncProbeAt = Date.now();
+        });
+        mc.on('message', (topic, payload)=>{ syncProbePending = false; try{ handleSyncMessage(topic, payload); }catch(e){} try{ if(syncDirty && !syncing && syncConnected && syncAnyUp()) pushSync(true); }catch(e){} });   // 任何消息到达（含自身回声）= 接收路径通畅，撤探针；有未发出的本机编辑则立即补推
+        mc.on('error', ()=>{ entry.up = false; _updateStatus(); });
+        mc.on('close', ()=>{ entry.up = false; syncProbePending = false; _updateStatus(); });
+        mc.on('offline', ()=>{ entry.up = false; _updateStatus(); });
+        mc.on('reconnect', ()=>{ try { requestState(); pushSync(true); } catch(e){} }); // 重连后主动补齐：拉最新 + 重发本机状态，修复断线期间漏同步
       });
-      mqttClient.on('connect', ()=>{
-        syncConnected = true;
-        setSyncStatus('on', '已同步');
-        // 上线即拉取家庭最新状态，并把本机状态发布（retain）给之后加入的设备
-        mqttClient.subscribe(syncBase() + '/#', { qos: 0 }, ()=>{ requestState(); pushSync(true); });  // sync/# 匹配 sync(控制) 与 sync/<senderId>(各设备快照)，晚加入者自动拿到全部 retained 快照
-        mqttClient.subscribe(evtTopic(), { qos: 0 });   // 落地版方案B：订阅孩子端行为事件流（单向 child→parent）
-        /* 首次连接也可能是死管道（iOS 网络切换后刚恢复）：连接成功即上探针，本机自己的快照/request 回声 4 秒内未到达 → 看门狗强制重建 */
-        syncProbePending = true; syncProbeAt = Date.now();
-      });
-      mqttClient.on('message', (topic, payload)=>{ syncProbePending = false; try{ handleSyncMessage(topic, payload); }catch(e){} try{ if(syncDirty && !syncing && syncConnected && mqttClient && mqttClient.connected) pushSync(true); }catch(e){} });   // 任何消息到达（含自身回声）= 接收路径通畅，撤探针；有未发出的本机编辑则立即补推
-      mqttClient.on('error', ()=> setSyncStatus('off', '同步出错'));
-      mqttClient.on('close', ()=>{ syncConnected = false; syncProbePending = false; setSyncStatus('off', '同步已断开'); });
-      mqttClient.on('reconnect', ()=>{ setSyncStatus('pending', '同步重连中…'); try { requestState(); pushSync(true); } catch(e){} }); // 重连后主动补齐：拉最新 + 重发本机状态，修复断线期间漏同步
       // 周期对账：切回前台 / 每 3 分钟主动拉取家庭最新状态并补推本机，修复 QoS 偶发丢包导致的漏同步
       // ⚠️ 生命周期监听只绑一次（syncLifeBound）：connectSync 每次断线重建都会执行到这里，重复绑定会让监听器/定时器指数堆积
       if(!syncLifeBound){
@@ -15652,7 +15696,7 @@ function connectSync(){
         /* 探针看门狗：回前台/刚连接后 4 秒内没有任何消息到达（含自身 request 回声）→ 接收路径已死（iOS 静默杀 socket 的假在线），强制重建；15 秒冷却防重建风暴 */
         setInterval(()=>{
           if(!syncProbePending) return;
-          if(!mqttClient || !mqttClient.connected){ syncProbePending = false; return; }
+          if(!syncAnyUp()){ syncProbePending = false; return; }
           if(Date.now() - syncProbeAt > 4000){
             syncProbePending = false;
             if(Date.now() - syncRebuildAt > 15000){ try{ syncForceRebuild(); }catch(e){} }
@@ -15665,7 +15709,7 @@ function connectSync(){
           try{
             if(document.hidden) return;                       // 后台不折腾，回前台由 syncOnVisChange 处理
             if(lastSyncState && lastSyncState.state !== 'off') return;
-            if(mqttClient && mqttClient.connected) return;
+            if(syncAnyUp()) return;
             if(Date.now() - syncRebuildAt > 15000){ syncForceRebuild(); }
           }catch(e){}
         }, 10000);
