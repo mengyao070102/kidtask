@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609231" />
+<meta name="build-version" content="202609232" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14583,8 +14583,10 @@ function renderDiag(){
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">本机角色</span><span>'+roleText+'</span></div>'
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">家庭码</span><span>'+esc(familyCode||'未知')+'</span></div>'
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">设备ID</span><span style="font-size:11px;word-break:break-all;text-align:right;max-width:62%;">'+esc(senderId||'未知')+'</span></div>'
+    + '<div id="syncDiagRows" style="border-top:1px dashed #dfe6f0;margin-top:6px;padding-top:6px;"></div>'
     + '<div id="peerList" style="border-top:1px dashed #dfe6f0;margin-top:6px;padding-top:6px;">'+peersHtml()+'</div>';
   bindPeerPager(document.getElementById('peerList'));
+  updateSyncDiagRows();
   try {
     const now = Date.now();
     if(!window.__diagVerT || now - window.__diagVerT > 60000){
@@ -14593,6 +14595,23 @@ function renderDiag(){
     }
   } catch(e){}
 }
+/* 诊断行轻量刷新：只重写 #syncDiagRows（不发版本检查、不重建 peer 列表），QA/无面板环境下零副作用 */
+function updateSyncDiagRows(){
+  try{
+    const el = document.getElementById('syncDiagRows');
+    if(!el) return;
+    const lc = Number(syncDiag.lineCn)||0, lg = Number(syncDiag.lineGlobe)||0;
+    const lineHtml = '<span style="color:'+(lc?'#1a9e57':'#c9ced6')+';">●大陆线</span> <span style="color:'+(lg?'#1a9e57':'#c9ced6')+';">●全球线</span>'+(lc&&lg?'（双线）':'');
+    const dSent = Number(syncDiag.sentAt)||0, dAck = Number(syncDiag.ackAt)||0, dRecv = Number(syncDiag.recvAt)||0, dRb = Number(syncDiag.rebuildAt)||0;
+    el.innerHTML =
+      '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">线路状态</span><span>'+lineHtml+'</span></div>'
+      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后发出快照</span><span>'+(dSent?esc(relTime(dSent)):'—')+(dAck?' <span style="color:#1a9e57;">✓已确认</span>':' <span style="color:#e5484d;">未确认</span>')+'</span></div>'
+      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后收到同步</span><span>'+(dRecv?esc(relTime(dRecv))+'（来自 '+esc(String(syncDiag.recvFrom||'').slice(0,6))+'，共'+(Number(syncDiag.recvN)||0)+'次）':'— 本机还没收到过任何远端快照')+'</span></div>'
+      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">连接重建</span><span>'+(dRb?esc(relTime(dRb))+'，共'+(Number(syncDiag.rebuildN)||0)+'次':'无')+'</span></div>';
+  }catch(e){}
+}
+/* 面板可见时每 10 秒刷新相对时间（元素不存在时立即返回，QA 环境零开销） */
+setInterval(()=>{ try{ if(document.getElementById('syncDiagRows')) updateSyncDiagRows(); }catch(e){} }, 10000);
 /* ===== 家庭设备在线状态：记录每台设备最后发来同步消息的时间（localStorage 持久化） ===== */
 const PEERS_KEY='kidtask_sync_peers_v1';
 function loadSyncPeers(){
@@ -15264,14 +15283,17 @@ function pushSync(force){
             c.client.publish(syncTopic(), _payload, { qos: 1, retain: true }, function(err){
               _acked = true;
               if(err) _errSeen = true;
+              else { syncDiagSet('ackAt', Date.now()); syncDiag.ackN = (Number(syncDiag.ackN)||0)+1; syncDiagSave(); }   // 诊断：服务器确认收到
             });
           }
         } catch(e){ _errSeen = true; }
       });
       if(_pending === 0){ syncDirty = true; return; }   // 没有任何活线（竞态窗口）
+      syncDiagSet('sentAt', Date.now());                // 诊断：本机已把快照交给活线
       syncDirty = false;   // 全量快照已发出，本机编辑已覆盖，清脏标记
       setTimeout(function(){
-        if(_acked && !_errSeen) return;
+        if(_acked && !_errSeen){ syncDiagSet('ackAt', Date.now()); return; }
+        syncDiagSet('deadAt', Date.now()); syncDiag.deadN = (Number(syncDiag.deadN)||0)+1; syncDiagSave();   // 诊断：8 秒无回执 = 死管道
         syncDirty = true;   // 无回执 / 有错误回执 → 编辑未确认送达，重新记脏
         try { if(!document.hidden && Date.now() - syncRebuildAt > 15000) syncForceRebuild(); } catch(e){}
       }, 8000);
@@ -15286,6 +15308,12 @@ function requestState(){
   if(!syncConnected || !syncAnyUp()) return;
   try { syncPublishAll(syncCtrlTopic(), JSON.stringify({ type:'request', senderId, ts: Date.now() }), { qos: 1 }); } catch(e){}
 }
+
+/* ===== 同步链路诊断统计（localStorage 持久化，刷新后仍可查看）：定位「发端没发出 / 收端没收到 / 合并丢弃」哪一环断了 ===== */
+const SYNC_DIAG_KEY = 'kidtask_sync_diag_v1';
+let syncDiag = (()=>{ try{ const o=JSON.parse(localStorage.getItem(SYNC_DIAG_KEY)||'{}'); return (o&&typeof o==='object')?o:{}; }catch(e){ return {}; } })();
+function syncDiagSave(){ try{ syncDiag.ver = getBuildVersion()||''; localStorage.setItem(SYNC_DIAG_KEY, JSON.stringify(syncDiag)); }catch(e){} }
+function syncDiagSet(k, v){ syncDiag[k] = v; syncDiagSave(); }
 
 function handleSyncMessage(topic, payload){
   if(topic && typeof topic === 'string' && topic.endsWith('/evt')){ handleChildEvent(payload); return; } // 事件流主题：孩子端行为事件（单向 child→parent）
@@ -15302,6 +15330,7 @@ function handleSyncMessage(topic, payload){
   logicalTs = Math.max(logicalTs, obj.ts + 1);     // 逻辑时钟推进：保证本端后续发出的 ts 一定比见过的更大，跨设备时钟不一致也不会被误判过期
   try { localStorage.setItem('kidtask_sync_ts', String(logicalTs)); } catch(e){}
   applySyncState(obj);
+  syncDiagSet('recvAt', Date.now()); syncDiag.recvFrom = obj.senderId; syncDiag.recvN = (Number(syncDiag.recvN)||0)+1; syncDiagSave();   // 诊断：本机收到并应用了远端快照
   showSyncPulse();
 }
 
@@ -15614,6 +15643,7 @@ let syncProbeAt = 0;            // 探针发出时刻
 let syncRebuildAt = 0;          // 上次强制重建时刻（冷却窗口）
 function syncForceRebuild(){
   try{ setSyncStatus('pending', '重连中…'); }catch(e){}
+  syncDiagSet('rebuildAt', Date.now()); syncDiag.rebuildN = (Number(syncDiag.rebuildN)||0)+1; syncDiagSave();   // 诊断：强制重建连接
   syncConnected = false;
   syncProbePending = false;
   syncRebuildAt = Date.now();
@@ -15662,6 +15692,8 @@ function connectSync(){
       const _updateStatus = ()=>{
         const ups = syncClients.filter(c => c.up && c.client).length;
         syncConnected = ups > 0;
+        /* 诊断：记录每条线路通断 */
+        syncClients.forEach(c => { syncDiagSet(c.url.indexOf('broker-cn') >= 0 ? 'lineCn' : 'lineGlobe', c.up && c.client ? 1 : 0); });
         if(ups > 0) setSyncStatus('on', ups > 1 ? '已同步·双线' : '已同步');
         else setSyncStatus('off', '同步已断开');
       };
