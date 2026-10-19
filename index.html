@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609232" />
+<meta name="build-version" content="202609233" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14602,10 +14602,16 @@ function updateSyncDiagRows(){
     if(!el) return;
     const lc = Number(syncDiag.lineCn)||0, lg = Number(syncDiag.lineGlobe)||0;
     const lineHtml = '<span style="color:'+(lc?'#1a9e57':'#c9ced6')+';">●大陆线</span> <span style="color:'+(lg?'#1a9e57':'#c9ced6')+';">●全球线</span>'+(lc&&lg?'（双线）':'');
-    const dSent = Number(syncDiag.sentAt)||0, dAck = Number(syncDiag.ackAt)||0, dRecv = Number(syncDiag.recvAt)||0, dRb = Number(syncDiag.rebuildAt)||0;
+    const dSent = Number(syncDiag.sentAt)||0, dAck = Number(syncDiag.ackAt)||0, dRecv = Number(syncDiag.recvAt)||0, dRb = Number(syncDiag.rebuildAt)||0, dDead = Number(syncDiag.deadAt)||0;
+    /* 确认状态按「最近一次发送」判定：ackAt/deadAt 早于 sentAt 的是旧记录，不能拿来当本次的结论 */
+    let ackBadge = '';
+    if(!dSent) ackBadge = '';
+    else if(dAck && dAck >= dSent) ackBadge = ' <span style="color:#1a9e57;">✓已确认</span>';
+    else if(dDead && dDead >= dSent) ackBadge = ' <span style="color:#e5484d;">✗服务器无回执</span>';
+    else if(!dDead || dDead < dSent) ackBadge = ' <span style="color:#e0a800;">…等待回执</span>';
     el.innerHTML =
       '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">线路状态</span><span>'+lineHtml+'</span></div>'
-      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后发出快照</span><span>'+(dSent?esc(relTime(dSent)):'—')+(dAck?' <span style="color:#1a9e57;">✓已确认</span>':' <span style="color:#e5484d;">未确认</span>')+'</span></div>'
+      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后发出快照</span><span>'+(dSent?esc(relTime(dSent)):'—')+(ackBadge)+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后收到同步</span><span>'+(dRecv?esc(relTime(dRecv))+'（来自 '+esc(String(syncDiag.recvFrom||'').slice(0,6))+'，共'+(Number(syncDiag.recvN)||0)+'次）':'— 本机还没收到过任何远端快照')+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">连接重建</span><span>'+(dRb?esc(relTime(dRb))+'，共'+(Number(syncDiag.rebuildN)||0)+'次':'无')+'</span></div>';
   }catch(e){}
