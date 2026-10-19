@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609234" />
+<meta name="build-version" content="202609235" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -7052,16 +7052,22 @@ let diceCfg = loadDiceCfg();
 let diceCfgTs = Number(localStorage.getItem(DICE_CFG_TS_KEY)) || 0;  // 同步收敛用：时间戳较大者胜
 let dice = loadDice();
 let diceSel = null; // 手动排序时选中的格子序号
+function normDiceLows(a){
+  const d = [5,4,3,2,1,0];
+  if(!Array.isArray(a) || a.length!==6) return d.slice();
+  return a.map(v=>{ v=Math.round(Number(v)); return (v>=0&&v<=6)?v:0; });
+}
 function loadDiceCfg(){
   try { const o = JSON.parse(localStorage.getItem(DICE_CFG_KEY));
     if(o && typeof o==='object') return {
       lowMin: Number(o.lowMin)||0.2, lowMax: Number(o.lowMax)||0.7,
       highMin: Number(o.highMin)||1, highMax: Number(o.highMax)||20,
       bigMin: Math.max(1, Number(o.bigMin)||10),            // ≥该值算「大数」
-      bigFromRound: Math.max(1, Number(o.bigFromRound)||10) // 第几局起才允许出现大数
+      bigFromRound: Math.max(1, Number(o.bigFromRound)||10),// 第几局起才允许出现大数
+      lows: normDiceLows(o.lows)                            // 6 档各自的低值面数量（每 10 局升一档）
     };
   } catch(e){}
-  return { lowMin:0.2, lowMax:0.7, highMin:1, highMax:20, bigMin:10, bigFromRound:10 };
+  return { lowMin:0.2, lowMax:0.7, highMin:1, highMax:20, bigMin:10, bigFromRound:10, lows:[5,4,3,2,1,0] };
 }
 function saveDiceCfg(){ localStorage.setItem(DICE_CFG_KEY, JSON.stringify(diceCfg)); }
 /* 推进 diceCfg 同步时间戳（与 timetable/pin 一致：本地单调+真实时钟，跨设备时钟不一致也不误判） */
@@ -7072,7 +7078,9 @@ function touchDiceCfgTs(){
 }
 /* 家长设置页「当前规则」显示：把当前摇骰子区间数值显示出来，便于核对 */
 function diceCfgCurrentText(){
-  return '当前规则：低区间 ' + fmtDiceVal(diceCfg.lowMin) + '–' + fmtDiceVal(diceCfg.lowMax)
+  const L = diceCfg.lows || [5,4,3,2,1,0];
+  return '当前规则：每 10 局升一档（1-10局 ' + L[0] + ' 低值面、11-20局 ' + L[1] + '、21-30局 ' + L[2] + '、31-40局 ' + L[3] + '、41-50局 ' + L[4] + '、51局起 ' + L[5] + '）'
+       + '；低区间 ' + fmtDiceVal(diceCfg.lowMin) + '–' + fmtDiceVal(diceCfg.lowMax)
        + '，高区间 ' + fmtDiceVal(diceCfg.highMin) + '–' + fmtDiceVal(diceCfg.highMax)
        + '；第 ' + diceCfg.bigFromRound + ' 局起才出现 ≥' + diceCfg.bigMin + ' 的大数。';
 }
@@ -7200,15 +7208,13 @@ function fmtDateTime(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullY
 function fmtDateTimeCN(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'年'+p(d.getMonth()+1)+'月'+p(d.getDate())+'日 '+p(d.getHours())+':'+p(d.getMinutes()); }
 function round1(x){ return Math.round(x*10)/10; }
 function fmtDiceVal(v){ return Number.isInteger(v) ? String(v) : Number(v).toFixed(1); }
-/* 按局数决定 低/高区间 的数量，生成 6 个数 */
+/* 按局数决定 低/高区间 的数量，生成 6 个数。
+   档位边界固定每 10 局升一档：第1-10局→lows[0]，11-20→lows[1]…第51局起→lows[5]。
+   lows[i] = 该档低值面数量（家长可配，0-6），高值面数量 = 6 - low。 */
 function genDiceRound(R){
-  let low, high;
-  if(R<=6) { low=5; high=1; }
-  else if(R<=12) { low=4; high=2; }
-  else if(R<=18) { low=3; high=3; }
-  else if(R<=24) { low=2; high=4; }
-  else if(R<=30) { low=1; high=5; }
-  else { low=0; high=6; }
+  const tier = R<=10?0 : R<=20?1 : R<=30?2 : R<=40?3 : R<=50?4 : 5;
+  const low = Math.max(0, Math.min(6, Math.round(Number((diceCfg.lows||[])[tier]))||0));
+  const high = 6 - low;
   const arr = [];
   const [hMin, hMax] = diceHighRange(R);
   for(let i=0;i<low;i++){ arr.push(round1(diceCfg.lowMin + Math.random()*(diceCfg.lowMax - diceCfg.lowMin))); }
@@ -13622,11 +13628,25 @@ function renderParent(){
             <span class="rm-sub">局起才出现</span>
           </div>
           <div class="rm-item">
-            <button class="rm-btn rm-save" id="saveDiceCfgBtn">💾 保存区间</button>
+            <span class="rm-label">升级节奏</span>
+            <span class="rm-sub">每 10 局升一档（共 6 档），各档低值面数量：</span>
+          </div>
+          <div class="rm-item">
+            <span class="rm-sub">1-10局</span><input class="rm-input sm" id="diceTierL0" type="number" step="1" min="0" max="6" value="${(diceCfg.lows||[])[0] != null ? (diceCfg.lows||[])[0] : 5}">
+            <span class="rm-sub">11-20局</span><input class="rm-input sm" id="diceTierL1" type="number" step="1" min="0" max="6" value="${(diceCfg.lows||[])[1] != null ? (diceCfg.lows||[])[1] : 4}">
+            <span class="rm-sub">21-30局</span><input class="rm-input sm" id="diceTierL2" type="number" step="1" min="0" max="6" value="${(diceCfg.lows||[])[2] != null ? (diceCfg.lows||[])[2] : 3}">
+          </div>
+          <div class="rm-item">
+            <span class="rm-sub">31-40局</span><input class="rm-input sm" id="diceTierL3" type="number" step="1" min="0" max="6" value="${(diceCfg.lows||[])[3] != null ? (diceCfg.lows||[])[3] : 2}">
+            <span class="rm-sub">41-50局</span><input class="rm-input sm" id="diceTierL4" type="number" step="1" min="0" max="6" value="${(diceCfg.lows||[])[4] != null ? (diceCfg.lows||[])[4] : 1}">
+            <span class="rm-sub">51局起</span><input class="rm-input sm" id="diceTierL5" type="number" step="1" min="0" max="6" value="${(diceCfg.lows||[])[5] != null ? (diceCfg.lows||[])[5] : 0}">
+          </div>
+          <div class="rm-item">
+            <button class="rm-btn rm-save" id="saveDiceCfgBtn">💾 保存设置</button>
             <span class="rm-tip current-rule" id="diceCfgTip"></span>
           </div>
           <div class="rm-item">
-            <span class="rm-tip">低区间生成小数（如 0.2-0.7），高区间生成整数（如 1-20）。大数规则：第「大数局次」局之前出现的高位数都小于「大数门槛」，达到该局次后才可能摇到 10 以上的大数。本设置修改后会自动同步到孩子端和其他家长端。</span>
+            <span class="rm-tip">低区间生成小数（如 0.2-0.7），高区间生成整数（如 1-20）。升级节奏：每 10 局升一档，数字越小开局越难（低值面多）；填 0 表示该档没有低值面、6 表示全是低值面。大数规则：第「大数局次」局之前出现的高位数都小于「大数门槛」。本设置修改后会自动同步到孩子端和其他家长端。</span>
           </div>
         </div>
       </div>
@@ -13878,10 +13898,16 @@ function renderParent(){
     const bf = parseInt(main.querySelector('#diceBigFrom').value,10);
     if(isNaN(bm)||bm<1){ showToast('「大数门槛」请填 ≥1 的整数哦～'); return; }
     if(isNaN(bf)||bf<1){ showToast('「大数局次」请填 ≥1 的整数哦～'); return; }
-    diceCfg = { lowMin:lm, lowMax:lx, highMin:hm, highMax:hx, bigMin:bm, bigFromRound:bf }; saveDiceCfg(); touchDiceCfgTs();
+    const lows = [];
+    for(let i=0;i<6;i++){
+      const v = parseInt(main.querySelector('#diceTierL'+i).value,10);
+      if(isNaN(v)||v<0||v>6){ showToast('「升级节奏」各档请填 0-6 的整数哦～'); return; }
+      lows.push(v);
+    }
+    diceCfg = { lowMin:lm, lowMax:lx, highMin:hm, highMax:hx, bigMin:bm, bigFromRound:bf, lows }; saveDiceCfg(); touchDiceCfgTs();
     updateDiceCfgTip();
-    try { pushSync(true); } catch(e){}   // 立即把新区间同步到孩子端和其他家长端
-    showToast('✅ 摇骰子区间已保存（第 '+bf+' 局起才出现 ≥'+bm+' 的大数），已同步各端');
+    try { pushSync(true); } catch(e){}   // 立即把新规则同步到孩子端和其他家长端
+    showToast('✅ 摇骰子规则已保存（每10局升一档，第 '+bf+' 局起才出现 ≥'+bm+' 的大数），已同步各端');
   };
   /* 进入家长设置页即显示当前摇骰子区间数值（未改动时也可见） */
   updateDiceCfgTip();
