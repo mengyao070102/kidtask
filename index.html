@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609233" />
+<meta name="build-version" content="202609234" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -7356,6 +7356,7 @@ function rollDice(){
   if(starLog.length > 1000) starLog.length = 1000;   // 上限 200→1000：保留更完整的星星使用历史
   saveStarLog(); saveDice();
   pushSync(true);   // 立即把「已消耗星星」广播到全家，各端星星数保持一致
+  try { showToast(syncConnected && syncAnyUp() ? '⭐ 已使用 1 颗星星，正在同步给全家' : '⭐ 已使用 1 颗星星，连上同步后会自动同步给全家'); } catch(e){}   // 如实提示：离线/死管道时不谎报「已同步」
   diceSel = null; renderDice();
 }
 
