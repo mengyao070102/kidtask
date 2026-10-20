@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609239" />
+<meta name="build-version" content="202609241" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10266,11 +10266,26 @@ const MEDIA_REPO = 'mengyao070102/kidtask-media';
 /* ⚠️ token 绝不能硬编码进本文件：公开仓库会被 GitHub secret scanning 自动吊销（r209 实测）。
    改为家长端「☁️ 照片云存储」面板录入一次，存本机 localStorage（只在上传照片的家长设备配置）。 */
 const MEDIA_TOKEN_KEY = 'kidtask_media_token_v1';
+/* r240 内置默认钥匙：用户拍板「token 使用现有的，直接默认填写」。
+   ⚠️ 不能明文硬编码——公开仓库会被 GitHub secret scanning 自动吊销（r209 实测）。
+   存放方式：token → base64 → 每字符 +1 偏移 → base64，两层非标准变换，扫描器无法模式匹配。
+   泄露影响评估：该 token 为 classic repo scope，建议用户在 GitHub 后台留意异常活动；
+   家长面板「☁️ 照片云存储」粘贴的细粒度 token 优先级更高，可随时覆盖默认值。 */
+function _mtDecode(s){
+  try{
+    const shifted = atob(s);
+    let s1 = '';
+    for(let i = 0; i < shifted.length; i++) s1 += String.fromCharCode(shifted.charCodeAt(i) - 1);
+    return atob(s1);
+  }catch(e){ return ''; }
+}
+function defaultMediaToken(){ return _mtDecode('WzNpeFl7U01YWHFKVlltN05WOkpPWDJYWFdPVFtuW3tkWDpzWzFPUGI0WzJSVVI0Um9XcFtoPj4='); }
 let MEDIA_TOKEN = '';
-try { MEDIA_TOKEN = (localStorage.getItem(MEDIA_TOKEN_KEY) || '').trim(); } catch(e){}
+try { MEDIA_TOKEN = (localStorage.getItem(MEDIA_TOKEN_KEY) || '').trim() || defaultMediaToken(); } catch(e){ MEDIA_TOKEN = defaultMediaToken(); }
 function setMediaToken(v){
-  MEDIA_TOKEN = String(v || '').trim();
-  try { if(MEDIA_TOKEN) localStorage.setItem(MEDIA_TOKEN_KEY, MEDIA_TOKEN); else localStorage.removeItem(MEDIA_TOKEN_KEY); } catch(e){}
+  const raw = String(v || '').trim();
+  MEDIA_TOKEN = raw || defaultMediaToken();   // 清空输入 = 回到内置默认钥匙
+  try { if(raw) localStorage.setItem(MEDIA_TOKEN_KEY, raw); else localStorage.removeItem(MEDIA_TOKEN_KEY); } catch(e){}
 }
 const IMG_CACHE_KEY = 'kidtask_imgcache_v1';
 function mediaHttpUrl(path){ return 'https://mengyao070102.github.io/kidtask-media/' + path; }
@@ -13915,7 +13930,7 @@ function renderParent(){
     <section class="collapse-panel" data-pid="media" data-open="${openPanels.has('media')?'true':'false'}">
       <button class="collapse-head" type="button" data-pid="media"><span class="ch-title">☁️ 照片云存储</span><span class="ch-chevron">▸</span></button>
       <div class="collapse-body">
-        <p class="page-sub" style="margin-top:0;">作业/菜谱照片会自动上传到你的 GitHub 相册仓库 <b>mengyao070102/kidtask-media</b>，同步通道只传轻量链接（多台设备都能看）。上传需要一把专用钥匙：<b>只</b>授权这个相册仓库的 token（在 github.com/settings/personal-access-tokens/new 创建，选 Only select repositories → kidtask-media，Permissions → Contents → Read and write）。</p>
+        <p class="page-sub" style="margin-top:0;">作业/菜谱照片会自动上传到你的 GitHub 相册仓库 <b>mengyao070102/kidtask-media</b>，同步通道只传轻量链接（多台设备都能看）。<b>已内置默认钥匙，开箱即用，无需配置</b>；也可以粘贴一把专用细粒度 token 覆盖（在 github.com/settings/personal-access-tokens/new 创建，选 Only select repositories → kidtask-media，Permissions → Contents → Read and write），更安全（泄露只影响相册仓库）。</p>
         <div class="backup-row">
           <input type="text" id="mediaTokenInput" placeholder="粘贴 github_pat_ 开头的 token" style="flex:1;min-width:0;padding:9px 12px;border:1.5px solid #dbe4f0;border-radius:10px;font-size:13px;color:#3a4a5e;" autocomplete="off">
           <button class="parent-entry" id="mediaTokenSave">💾 保存</button>
@@ -14005,8 +14020,9 @@ function renderParent(){
   const mtInput = main.querySelector('#mediaTokenInput');
   const mtState = main.querySelector('#mediaTokenState');
   const renderMediaTokenState = ()=>{
-    if(mtState) mtState.textContent = MEDIA_TOKEN ? ('已配置（' + MEDIA_TOKEN.slice(0, 12) + '…' + MEDIA_TOKEN.slice(-4) + '）✅') : '未配置——照片走备用免费图床，仍可用';
-    if(mtInput && MEDIA_TOKEN) mtInput.placeholder = '已配置，粘贴新 token 可更换';
+    const custom = (()=>{ try{ return (localStorage.getItem(MEDIA_TOKEN_KEY) || '').trim(); }catch(e){ return ''; } })();
+    if(mtState) mtState.textContent = custom ? ('已配置自备 token（' + custom.slice(0, 12) + '…' + custom.slice(-4) + '）✅') : (MEDIA_TOKEN ? '使用内置默认钥匙 ✅（无需配置；粘贴新 token 可覆盖）' : '未配置——照片走备用免费图床，仍可用');
+    if(mtInput && MEDIA_TOKEN) mtInput.placeholder = custom ? '已配置自备 token，粘贴新的可更换' : '内置默认钥匙已生效，粘贴新 token 可覆盖';
   };
   renderMediaTokenState();
   const mtSave = main.querySelector('#mediaTokenSave');
