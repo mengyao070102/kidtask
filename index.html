@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609251" />
+<meta name="build-version" content="202609253" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -15904,10 +15904,13 @@ function applySyncState(obj){
       pushSync();
     }
     /* 庄园/宠物/换装/小游戏/放松板块按用户要求纯本地、不同步：此处不再应用远端，避免覆盖本机本地进度 */
-    /* 标量元数据(年级/学期/PIN)按 ts 取较新收敛：gTs/sTs/pTs 中较大者胜；旧版/双方均未改(gTs=0 且本地 gradeTs=0)时退回 last-applied 兼容 */
-    if(obj.grade != null){ const _gt = Number(obj.gTs)||0; if((_gt===0 && gradeTs===0) || _gt > gradeTs){ const _oldGrade = grade; grade = obj.grade; if(_gt>gradeTs) gradeTs = _gt; try { localStorage.setItem(GKEY, grade); } catch(e){} if(_oldGrade !== grade) onGradeChanged(); } }
-    if(obj.semester != null){ const _st = Number(obj.sTs)||0; if((_st===0 && semTs===0) || _st > semTs){ semester = obj.semester; if(_st>semTs) semTs = _st; try { localStorage.setItem(SKEY, semester); } catch(e){} } }
-    if(obj.pin != null){ const _pt = Number(obj.pTs)||0; if((_pt===0 && pinTs===0) || _pt > pinTs){ try { setPin(String(obj.pin)); } catch(e){} if(_pt>pinTs) pinTs = _pt; } } // 家长密码按 ts 取较新，各端保持一致
+    /* 标量元数据(年级/学期/PIN)按 ts 取较新收敛：gTs/sTs/pTs 中较大者胜；旧版/双方均未改(gTs=0 且本地 gradeTs=0)时退回 last-applied 兼容
+       r252：首次合并且本机是「空设备」（无任务、无流水——新手机首次打开链接/存储被清后重入）时，年级/学期/PIN 直接以家庭数据为准：
+       新设备在首次向导里随手选的年级会把本地 gradeTs 抬到当前时间，压过老设备较早的 gTs，导致「首次打开年级不同步」。 */
+    const _blankDevice = _firstApply && _tasksBefore === 0 && extraLog.length === 0;
+    if(obj.grade != null){ const _gt = Number(obj.gTs)||0; if(_blankDevice || (_gt===0 && gradeTs===0) || _gt > gradeTs){ const _oldGrade = grade; grade = obj.grade; gradeTs = Math.max(_gt, 1); try { localStorage.setItem(GKEY, grade); localStorage.setItem('kidtask_gts', String(gradeTs)); } catch(e){} if(_oldGrade !== grade) onGradeChanged(); } }
+    if(obj.semester != null){ const _st = Number(obj.sTs)||0; if(_blankDevice || (_st===0 && semTs===0) || _st > semTs){ semester = obj.semester; semTs = Math.max(_st, 1); try { localStorage.setItem(SKEY, semester); localStorage.setItem('kidtask_sts', String(semTs)); } catch(e){} } }
+    if(obj.pin != null){ const _pt = Number(obj.pTs)||0; if(_blankDevice || (_pt===0 && pinTs===0) || _pt > pinTs){ try { setPin(String(obj.pin)); } catch(e){} pinTs = Math.max(_pt, 1); try{ localStorage.setItem('kidtask_pts', String(pinTs)); }catch(e){} } } // 家长密码按 ts 取较新，各端保持一致；空设备首次合并以家庭为准
     if(obj.timetable && typeof obj.timetable === 'object' && !isLegacyDefaultTT(obj.timetable)){   // 课程表：按 ttTs 取较新，最后编辑者胜；远端旧示例课表不采纳（避免覆盖真实课表）
       const _tt = Number(obj.ttTs)||0;
       if((_tt===0 && ttTs===0) || _tt > ttTs){
@@ -16058,7 +16061,7 @@ function applySyncState(obj){
     if(obj.storyData && typeof obj.storyData === 'object'){ // 睡前故事：本端无或换了新故事才采用远端
       if(!storyData || (obj.storyData.title && obj.storyData.title !== storyData.title)){ storyData = obj.storyData; saveStory(); }
     }
-  } catch(e){}
+  } catch(e){ try{ console.warn('[sync] applySyncState 异常:', e && (e.stack||e.message||e)); }catch(e2){} }
   try { render(); } catch(e){}
   /* 首次合并且本机原先是空的（iOS 存储被系统清理/换设备）：明确告知数据已从家庭恢复，避免误以为清零 */
   if(_firstApply && _tasksBefore === 0 && tasks.length > 0){
