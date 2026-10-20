@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609235" />
+<meta name="build-version" content="202609236" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -15227,7 +15227,8 @@ function collectSyncState(){
    · 接收端 applySyncState/mergeHwMaps 遇到标记时按路径从本机旧数据找回真图，找不回则置空
      （标记绝不落盘），因此甩图只影响「本次快照没带上图」，不会破坏任何一端的已有图片。 */
 const SYNC_SHED = '__SYNC_SHED__';
-let syncShedWarnedAt = 0;
+let syncShedWarnedAt = 0; try{ syncShedWarnedAt = Number(localStorage.getItem('kidtask_shed_toast_at'))||0; }catch(e){}   // 持久化：跨刷新节流，避免每次刷新都弹「已省略 N 张图片」
+let syncAutoPushing = false;   // 自动推送中（连接建立/重连/周期对账/合并后补推）：非用户主动编辑，甩图不弹提示
 function repairShedDeep(remote, local){
   try{
     if(Array.isArray(remote)){
@@ -15274,8 +15275,9 @@ function buildSyncPayload(){
       if(nj.length < json.length){ json = nj; shed++; }
       else { r.o[r.k] = orig; }
     }
-    if(shed > 0 && Date.now() - syncShedWarnedAt > 3600000){
+    if(shed > 0 && !syncAutoPushing && Date.now() - syncShedWarnedAt > 3600000){
       syncShedWarnedAt = Date.now();
+      try{ localStorage.setItem('kidtask_shed_toast_at', String(syncShedWarnedAt)); }catch(e){}
       try { showToast('⚠️ 同步数据过大，本次已省略 ' + shed + ' 张图片传输（本机图片不受影响）'); } catch(e){}
     }
   } catch(e){}
@@ -15658,7 +15660,7 @@ function applySyncState(obj){
   }
   syncing = false;
   syncFirstApplied = true;   // 标记已完成至少一次与 peer 的合并，之后出现的编辑冲突才提示
-  try{ if(syncDirty && syncConnected && syncAnyUp()) pushSync(true); }catch(e){}   // 合并窗口内产生/标记的本机编辑，现在补发
+  try{ if(syncDirty && syncConnected && syncAnyUp()){ syncAutoPushing = true; pushSync(true); syncAutoPushing = false; } }catch(e){ syncAutoPushing = false; }   // 合并窗口内产生/标记的本机编辑，现在补发（自动补发：甩图不弹提示）
 }
 
 /* iOS 生命周期处理（苹果手机编辑后不同步的根因修复）：
@@ -15707,7 +15709,7 @@ function syncOnVisChange(){
     /* 连接自称健在：发探针实测接收路径（可能 connected=true 但 socket 已被 iOS 静默杀死的假在线）。
        request 即探针：本机订阅 sync2/# 会收到自己的回声；4 秒无任何消息到达则由看门狗强制重建。 */
     syncProbePending = true; syncProbeAt = Date.now();
-    requestState(); pushSync(true);   // 正常对账补推
+    syncAutoPushing = true; requestState(); pushSync(true); syncAutoPushing = false;   // 正常对账补推（自动：甩图不弹提示）
   }catch(e){}
 }
 let syncLifeBound = false;   // connectSync 会被断线重建反复调用，生命周期监听只绑一次（否则指数堆积重复推送）
@@ -15741,7 +15743,7 @@ function connectSync(){
           entry.up = true;
           _updateStatus();
           // 上线即拉取家庭最新状态，并把本机状态发布（retain）给之后加入的设备
-          mc.subscribe(syncBase() + '/#', { qos: 0 }, ()=>{ requestState(); pushSync(true); });  // sync/# 匹配 sync(控制) 与 sync/<senderId>(各设备快照)，晚加入者自动拿到全部 retained 快照
+          mc.subscribe(syncBase() + '/#', { qos: 0 }, ()=>{ syncAutoPushing = true; try{ requestState(); pushSync(true); }finally{ syncAutoPushing = false; } });  // sync/# 匹配 sync(控制) 与 sync/<senderId>(各设备快照)，晚加入者自动拿到全部 retained 快照（自动推送：甩图不弹提示）
           mc.subscribe(evtTopic(), { qos: 0 });   // 落地版方案B：订阅孩子端行为事件流（单向 child→parent）
           /* 首次连接也可能是死管道（iOS 网络切换后刚恢复）：连接成功即上探针，本机自己的快照/request 回声 4 秒内未到达 → 看门狗强制重建 */
           syncProbePending = true; syncProbeAt = Date.now();
@@ -15750,7 +15752,7 @@ function connectSync(){
         mc.on('error', ()=>{ entry.up = false; _updateStatus(); });
         mc.on('close', ()=>{ entry.up = false; syncProbePending = false; _updateStatus(); });
         mc.on('offline', ()=>{ entry.up = false; _updateStatus(); });
-        mc.on('reconnect', ()=>{ try { requestState(); pushSync(true); } catch(e){} }); // 重连后主动补齐：拉最新 + 重发本机状态，修复断线期间漏同步
+        mc.on('reconnect', ()=>{ syncAutoPushing = true; try { requestState(); pushSync(true); } catch(e){} finally { syncAutoPushing = false; } }); // 重连后主动补齐：拉最新 + 重发本机状态，修复断线期间漏同步（自动推送：甩图不弹提示）
       });
       // 周期对账：切回前台 / 每 3 分钟主动拉取家庭最新状态并补推本机，修复 QoS 偶发丢包导致的漏同步
       // ⚠️ 生命周期监听只绑一次（syncLifeBound）：connectSync 每次断线重建都会执行到这里，重复绑定会让监听器/定时器指数堆积
