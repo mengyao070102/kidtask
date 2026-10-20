@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609243" />
+<meta name="build-version" content="202609244" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13175,6 +13175,23 @@ function menuCardHtml(wd, off){
       : `<div class="mc-empty">${canEdit
           ? (weekOff===1 ? '下周菜谱还没排哦～点「✏️ 编辑」提前安排起来吧！' : '本周菜谱还没发布哦～点「✏️ 编辑」写上这一周吃什么吧！')
           : (weekOff===1 ? '下周菜谱还没有排哦～请爸爸妈妈提前安排吧！' : '本周菜谱还没有发布哦～请爸爸妈妈在家长端发布吧！')}</div>`);
+  /* r244：本周为空但其他周桶有内容 → 提示并提供「一键沿用」（防设备时钟不准存错周 / 上周提前存的菜单重复利用） */
+  let adoptHtml = '';
+  if(weekOff === 0 && canEdit && !menuHasContent(0)){
+    const cur = weekKeyOf(0), nxt = weekKeyOf(1);
+    const others = Object.keys((menu||{}).weeks||{})
+      .filter(k => k !== cur && k !== nxt)
+      .filter(k => { const b = menu.weeks[k] || {}; return menuDaysHasContent(b.days) || (Array.isArray(b.imgs) && b.imgs.length) || b.img; })
+      .sort();
+    if(others.length){
+      const from = others[others.length - 1];
+      const rel = from < cur ? '上周' : '其他周';
+      adoptHtml = `<div class="mc-adopt-bar" style="margin:8px 0 2px;padding:8px 10px;border-radius:10px;background:linear-gradient(135deg,#fff7e6,#ffefd0);border:1px solid #f2d9a8;font-size:12px;line-height:1.6;">
+        📦 检测到 <b>${esc(from)}</b>（${rel}）存有菜谱，但不是本周——通常是<b>存菜谱的设备日期不准</b>或上周提前存的。
+        <button class="mc-adopt" data-from="${esc(from)}" type="button" style="margin-left:4px;padding:5px 12px;border:none;border-radius:8px;background:linear-gradient(135deg,#f7a440,#f08c1f);color:#fff;font-weight:700;cursor:pointer;">📋 沿用到本周</button>
+      </div>`;
+    }
+  }
   return `
     <div class="mc-head">
       <span class="mc-title">🍱 ${weekName}菜谱</span>
@@ -13186,7 +13203,7 @@ function menuCardHtml(wd, off){
         ${canEdit ? '<button class="mc-edit" id="menuEditBtn" type="button">✏️ 编辑</button>' : ''}
       </span>
     </div>
-    ${bodyHtml}`;
+    ${bodyHtml}${adoptHtml}`;
 }
 /* 菜谱大图查看器：点击缩略图全屏预览 */
 function menuImgView(src, title){
@@ -13229,6 +13246,23 @@ function bindMenuCard(card){
       if(off === menuViewWeek) return;
       menuViewWeek = off;
       refreshMenuCard();
+    };
+  });
+  /* r244：一键沿用其他周的菜谱到本周（复制 days+imgs，touchMenuTs 后正常同步） */
+  card.querySelectorAll('.mc-adopt').forEach(b=>{
+    b.onclick = ()=>{
+      const from = b.dataset.from;
+      const srcB = ((menu||{}).weeks||{})[from];
+      if(!srcB){ try{ showToast('⚠️ 那一周的数据不在了'); }catch(e){} return; }
+      const to = weekKeyOf(0);
+      menu.weeks[to] = {
+        days: normalizeMenuDays(srcB.days),
+        imgs: (Array.isArray(srcB.imgs) ? srcB.imgs : []).slice(0, 6),
+        img: (Array.isArray(srcB.imgs) && srcB.imgs[0]) || srcB.img || ''
+      };
+      menuViewWeek = 0;
+      saveMenu();   // 落盘 + touchMenuTs + pushSync + 原位刷新卡片
+      try{ showToast('✅ 已把 ' + from + ' 的菜谱沿用到本周，并同步给其他设备'); }catch(e){}
     };
   });
 }
