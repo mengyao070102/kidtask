@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609236" />
+<meta name="build-version" content="202609237" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14630,6 +14630,16 @@ function updateSyncDiagRows(){
     const lc = Number(syncDiag.lineCn)||0, lg = Number(syncDiag.lineGlobe)||0;
     const lineHtml = '<span style="color:'+(lc?'#1a9e57':'#c9ced6')+';">●大陆线</span> <span style="color:'+(lg?'#1a9e57':'#c9ced6')+';">●全球线</span>'+(lc&&lg?'（双线）':'');
     const dSent = Number(syncDiag.sentAt)||0, dAck = Number(syncDiag.ackAt)||0, dRecv = Number(syncDiag.recvAt)||0, dRb = Number(syncDiag.rebuildAt)||0, dDead = Number(syncDiag.deadAt)||0;
+    /* 图片同步：本机图片数 + 最近收到的快照带图情况（缺失>0 = 有图没同步到本端） */
+    const dImgL = Number(syncDiag.imgLocal)||0, dImgR = Number(syncDiag.imgRecv)||0, dImgShed = Number(syncDiag.imgShed)||0;
+    const dImgF = Number(syncDiag.imgFilled)||0, dImgMiss = Number(syncDiag.imgMissing)||0;
+    let imgBadge = '—';
+    if(dRecv && (dImgR || dImgShed)){
+      imgBadge = '快照含图 '+dImgR+' 张' + (dImgShed ? '，发送端省略 '+dImgShed+' 张' : '');
+      if(dImgF) imgBadge += '；本机回填 '+dImgF+' 张';
+      if(dImgMiss) imgBadge += '；<span style="color:#e0a800;">仍缺 '+dImgMiss+' 张（未同步到）</span>';
+      else if(dImgShed) imgBadge += '；<span style="color:#1a9e57;">缺失部分已全部回填</span>';
+    } else if(dRecv){ imgBadge = '快照不含图片'; }
     /* 确认状态按「最近一次发送」判定：ackAt/deadAt 早于 sentAt 的是旧记录，不能拿来当本次的结论 */
     let ackBadge = '';
     if(!dSent) ackBadge = '';
@@ -14640,7 +14650,8 @@ function updateSyncDiagRows(){
       '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">线路状态</span><span>'+lineHtml+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后发出快照</span><span>'+(dSent?esc(relTime(dSent)):'—')+(ackBadge)+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后收到同步</span><span>'+(dRecv?esc(relTime(dRecv))+'（来自 '+esc(String(syncDiag.recvFrom||'').slice(0,6))+'，共'+(Number(syncDiag.recvN)||0)+'次）':'— 本机还没收到过任何远端快照')+'</span></div>'
-      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">连接重建</span><span>'+(dRb?esc(relTime(dRb))+'，共'+(Number(syncDiag.rebuildN)||0)+'次':'无')+'</span></div>';
+      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">连接重建</span><span>'+(dRb?esc(relTime(dRb))+'，共'+(Number(syncDiag.rebuildN)||0)+'次':'无')+'</span></div>'
+      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">图片同步</span><span>'+(dImgL?('本机 '+dImgL+' 张 ｜ '):'')+imgBadge+'</span></div>';
   }catch(e){}
 }
 /* 面板可见时每 10 秒刷新相对时间（元素不存在时立即返回，QA 环境零开销） */
@@ -15229,12 +15240,16 @@ function collectSyncState(){
 const SYNC_SHED = '__SYNC_SHED__';
 let syncShedWarnedAt = 0; try{ syncShedWarnedAt = Number(localStorage.getItem('kidtask_shed_toast_at'))||0; }catch(e){}   // 持久化：跨刷新节流，避免每次刷新都弹「已省略 N 张图片」
 let syncAutoPushing = false;   // 自动推送中（连接建立/重连/周期对账/合并后补推）：非用户主动编辑，甩图不弹提示
+let syncRepairStats = null;    // 应用远端快照期间的甩图回填统计：{ filled: 从本机旧数据回填的张数, empty: 仍缺的张数（发送端省略且本机没有） }
 function repairShedDeep(remote, local){
   try{
     if(Array.isArray(remote)){
       const L = Array.isArray(local) ? local : [];
       for(let i = 0; i < remote.length; i++){
-        if(remote[i] === SYNC_SHED){ remote[i] = (typeof L[i] === 'string' && L[i].indexOf('data:image') === 0) ? L[i] : ''; }
+        if(remote[i] === SYNC_SHED){
+          remote[i] = (typeof L[i] === 'string' && L[i].indexOf('data:image') === 0) ? L[i] : '';
+          if(syncRepairStats){ if(remote[i].indexOf('data:image') === 0) syncRepairStats.filled++; else syncRepairStats.empty++; }
+        }
         else if(remote[i] && typeof remote[i] === 'object') repairShedDeep(remote[i], L[i]);
       }
       return;
@@ -15242,7 +15257,10 @@ function repairShedDeep(remote, local){
     if(remote && typeof remote === 'object'){
       const L = (local && typeof local === 'object') ? local : {};   // 无本机旧数据时也要走查：标记一律置空，绝不落盘
       for(const k of Object.keys(remote)){
-        if(remote[k] === SYNC_SHED){ remote[k] = (typeof L[k] === 'string' && L[k].indexOf('data:image') === 0) ? L[k] : ''; }
+        if(remote[k] === SYNC_SHED){
+          remote[k] = (typeof L[k] === 'string' && L[k].indexOf('data:image') === 0) ? L[k] : '';
+          if(syncRepairStats){ if(remote[k].indexOf('data:image') === 0) syncRepairStats.filled++; else syncRepairStats.empty++; }
+        }
         else if(remote[k] && typeof remote[k] === 'object') repairShedDeep(remote[k], L[k]);
       }
     }
@@ -15252,6 +15270,13 @@ function buildSyncPayload(){
   const LIMIT = 950 * 1024;
   const state = collectSyncState();
   let json = JSON.stringify(state);
+  try{   // 诊断：本机快照里的图片总数（不管是否超限都统计，供「图片同步」指标展示）
+    let _n = 0;
+    (function _cnt(x){ if(!x || typeof x !== 'object') return; if(Array.isArray(x)){ x.forEach(_cnt); return; }
+      for(const k of Object.keys(x)){ const v = x[k]; if(typeof v === 'string'){ if(v.indexOf('data:image') === 0) _n++; } else if(v && typeof v === 'object') _cnt(v); }
+    })(state);
+    syncDiagSet('imgLocal', _n);
+  }catch(e){}
   if(json.length <= LIMIT) return json;
   try {
     const refs = [];
@@ -15364,7 +15389,21 @@ function handleSyncMessage(topic, payload){
   try { recordPeerSeen(obj.senderId); } catch(e){}   /* 设备在线追踪：记录对端最后活跃时间（家长端同步状态展示用） */
   logicalTs = Math.max(logicalTs, obj.ts + 1);     // 逻辑时钟推进：保证本端后续发出的 ts 一定比见过的更大，跨设备时钟不一致也不会被误判过期
   try { localStorage.setItem('kidtask_sync_ts', String(logicalTs)); } catch(e){}
+  /* 图片同步诊断：快照里带了 N 张图、发送端因超限省略 M 张；应用后统计回填 F 张 / 仍缺 E 张（E>0 = 有图没同步到本端） */
+  let _imgRecv = 0, _imgShed = 0;
+  try {
+    (function _walkImg(x){ if(!x || typeof x !== 'object') return; if(Array.isArray(x)){ x.forEach(_walkImg); return; }
+      for(const k of Object.keys(x)){ const v = x[k];
+        if(typeof v === 'string'){ if(v.indexOf('data:image') === 0) _imgRecv++; else if(v === SYNC_SHED) _imgShed++; }
+        else if(v && typeof v === 'object') _walkImg(v); } })(obj);
+  } catch(e){}
+  syncRepairStats = { filled: 0, empty: 0 };
   applySyncState(obj);
+  try {
+    const _rs = syncRepairStats; syncRepairStats = null;
+    syncDiagSet('imgRecv', _imgRecv); syncDiagSet('imgShed', _imgShed);
+    syncDiagSet('imgFilled', _rs ? _rs.filled : 0); syncDiagSet('imgMissing', _rs ? _rs.empty : 0);
+  } catch(e){ syncRepairStats = null; }
   syncDiagSet('recvAt', Date.now()); syncDiag.recvFrom = obj.senderId; syncDiag.recvN = (Number(syncDiag.recvN)||0)+1; syncDiagSave();   // 诊断：本机收到并应用了远端快照
   showSyncPulse();
 }
