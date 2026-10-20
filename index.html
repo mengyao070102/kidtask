@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609241" />
+<meta name="build-version" content="202609243" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -14782,7 +14782,7 @@ function renderDiag(){
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">同步连接</span><span>'+st+'</span></div>'
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">本机角色</span><span>'+roleText+'</span></div>'
     + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">家庭码</span><span>'+esc(familyCode||'未知')+'</span></div>'
-    + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">设备ID</span><span style="font-size:11px;word-break:break-all;text-align:right;max-width:62%;">'+esc(senderId||'未知')+'</span></div>'
+    + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">本机设备</span><span>'+esc(deviceModelName()+' · '+String(senderId||'').slice(0,6))+'</span></div>'
     + '<div id="syncDiagRows" style="border-top:1px dashed #dfe6f0;margin-top:6px;padding-top:6px;"></div>'
     + '<div id="peerList" style="border-top:1px dashed #dfe6f0;margin-top:6px;padding-top:6px;">'+peersHtml()+'</div>';
   bindPeerPager(document.getElementById('peerList'));
@@ -14825,7 +14825,7 @@ function updateSyncDiagRows(){
     el.innerHTML =
       '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">线路状态</span><span>'+lineHtml+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后发出快照</span><span>'+(dSent?esc(relTime(dSent)):'—')+(ackBadge)+'</span></div>'
-      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后收到同步</span><span>'+(dRecv?esc(relTime(dRecv))+'（来自 '+esc(String(syncDiag.recvFrom||'').slice(0,6))+'，共'+(Number(syncDiag.recvN)||0)+'次）':'— 本机还没收到过任何远端快照')+'</span></div>'
+      + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">最后收到同步</span><span>'+(dRecv?esc(relTime(dRecv))+'（来自 '+esc(peerNameOf(String(syncDiag.recvFrom||'')))+'，共'+(Number(syncDiag.recvN)||0)+'次）':'— 本机还没收到过任何远端快照')+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">连接重建</span><span>'+(dRb?esc(relTime(dRb))+'，共'+(Number(syncDiag.rebuildN)||0)+'次':'无')+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">图片同步</span><span>'+(dImgL?('本机 '+dImgL+' 张 ｜ '):'')+imgBadge+'</span></div>'
       + '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">☁️ 云端备份</span><span>'+(cloudBadge||'—（家长端「备份到云端」后显示）')+'</span></div>';
@@ -14869,13 +14869,13 @@ function peersHtml(){
   const totalPages=Math.max(1, Math.ceil(ids.length / PEER_PAGE_SIZE));
   if(peerPage >= totalPages) peerPage = totalPages - 1;
   if(peerPage < 0) peerPage = 0;
-  const rows=['<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 本机</span><span style="color:'+(syncConnected?'#1a9e57':'#e5484d')+';font-weight:700;">'+(syncConnected?'在线':'离线')+'</span></div>'];
+  const rows=['<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 本机（'+esc(deviceModelName())+'）</span><span style="color:'+(syncConnected?'#1a9e57':'#e5484d')+';font-weight:700;">'+(syncConnected?'在线':'离线')+'</span></div>'];
   if(!ids.length){
     rows.push('<div style="padding:4px 0;color:#9aa3b2;font-size:12px;line-height:1.6;">还没有收到其他设备的消息——其他设备打开 App 并连上同步后，会出现在这里。</div>');
   } else {
     const start = peerPage * PEER_PAGE_SIZE;
     ids.slice(start, start + PEER_PAGE_SIZE).forEach(id=>{
-      rows.push('<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 设备 '+esc(String(id).slice(0,6))+'</span><span>最后活跃 '+relTime(peers[id])+'</span></div>');
+      rows.push('<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:#666;">📱 '+esc(peerNameOf(id))+'</span><span>最后活跃 '+relTime(peers[id])+'</span></div>');
     });
     if(totalPages > 1){
       rows.push('<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 0 2px;">'
@@ -15167,6 +15167,46 @@ let lastRemoteTs = 0;            // 已应用的最大远端 ts（去重过期�
 let logicalTs = 0;              // 本地单调逻辑时钟，避免跨设备真实时钟不一致导致误判过期
 try { logicalTs = Number(localStorage.getItem('kidtask_sync_ts')) || 0; } catch(e){}
 function bumpSyncTs(){ logicalTs = Math.max(logicalTs + 1, Date.now()); try { localStorage.setItem('kidtask_sync_ts', String(logicalTs)); } catch(e){} return logicalTs; }
+/* 设备可读名（r242）：UA 解析型号（iPhone / 安卓机型代号 / Windows 电脑 / Mac），生成一次永久缓存。
+   iPhone 的 UA 不含具体型号（系统限制），只能到 "iPhone"；安卓 UA 一般带真实机型代号。 */
+function deviceModelName(){
+  try{
+    const cached = localStorage.getItem('kidtask_devname_v1');
+    if(cached) return cached;
+  }catch(e){}
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  let name = '';
+  if(/iPad/i.test(ua)) name = 'iPad';
+  else if(/iPhone/i.test(ua)) name = 'iPhone';
+  else if(/Android/i.test(ua)){
+    const m = ua.match(/Android\s[^;)]*;\s*([^;)]+?)(?:\s+Build\/\S+)?\s*(?:;\s|\))/i);
+    name = m ? m[1].trim().replace(/^wv\s+/i, '') : '';
+    if(!name || name.length < 2 || /^android$/i.test(name)) name = '安卓设备';   // 'K' 是部分厂商 UA 占位符
+  }
+  else if(/Windows/i.test(ua)) name = 'Windows 电脑';
+  else if(/Macintosh|Mac OS X/i.test(ua)) name = 'Mac';
+  else name = '设备';
+  try{ localStorage.setItem('kidtask_devname_v1', name); }catch(e){}
+  return name;
+}
+/* 各端设备名映射表（随快照广播 devName，收端记住 id→名字），诊断面板/设备列表显示可读名 */
+function rememberPeerName(id, name){
+  try{
+    if(!id || !name) return;
+    const names = JSON.parse(localStorage.getItem('kidtask_peer_names_v1') || '{}') || {};
+    const clean = String(name).slice(0, 24);
+    if(names[id] === clean) return;
+    names[id] = clean;
+    localStorage.setItem('kidtask_peer_names_v1', JSON.stringify(names));
+  }catch(e){}
+}
+function peerNameOf(id){
+  try{
+    const names = JSON.parse(localStorage.getItem('kidtask_peer_names_v1') || '{}') || {};
+    if(names[id]) return names[id];
+  }catch(e){}
+  return '设备 ' + String(id || '').slice(0, 6);
+}
 /* 设备ID：首次生成后写入 localStorage 永久固定——同一设备不再每次刷新变"新设备"
    （旧行为随机生成 → 诊断面板幻影设备堆积 + broker 残留大量历史 retain 快照拖垮同步） */
 const senderId = (function(){
@@ -15367,6 +15407,7 @@ function openInviteModal(){
 function collectSyncState(){
   return {
     type: 'sync', senderId, ts: bumpSyncTs(),
+    devName: deviceModelName(),   // r242 设备可读名，随快照广播给其他端
     grade, semester, pin: getPin(),
     gTs: gradeTs, sTs: semTs, pTs: pinTs,
     tasks,
@@ -15557,6 +15598,7 @@ function handleSyncMessage(topic, payload){
   let obj;
   try { obj = JSON.parse(typeof payload === 'string' ? payload : payload.toString()); } catch(e){ return; }
   if(!obj || obj.senderId === senderId) return;   // 忽略自己回声
+  try{ if(obj.devName) rememberPeerName(obj.senderId, obj.devName); }catch(e){}   // r242 记住各端设备名
   if(obj.type === 'request'){ pushSync(true); return; } // 回应：把自己的最新状态发过去
   if(obj.type !== 'sync' || typeof obj.ts !== 'number') return;
   if((lastRemoteTsBySender[obj.senderId]||0) >= obj.ts) return;  // 按发送方去重：QoS1/retain 重复投递或同发送方旧消息只处理一次（不再用全局 ts 误杀不同发送方的合法新消息）
