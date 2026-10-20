@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609247" />
+<meta name="build-version" content="202609250" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13312,25 +13312,40 @@ function mountMenuCard(){
 /* 家长端编辑弹窗：一周 7 天 × 午餐/晚餐（文字 + 📷 照片），可切本周/下周编辑，保存即同步。
    草稿 menuEditDraft 挂在模块级：照片压缩是异步的，先存草稿再统一落盘。 */
 let menuEditDraft = null;
+let menuEditStash = {};   // r248 周切换暂存：weekOff -> {weekImgs, inputs}，保存时一并落盘、取消即丢弃
 function menuEditPopup(off){
   const weekOff = (off==null ? menuViewWeek : Number(off)||0);
-  const weekName = weekOff === 1 ? '下周' : '本周';
+  const weekName = weekOff===1?'下周':weekOff===-1?'上周':weekOff===2?'下下周':weekOff===-2?'上上周':'本周';
   const ov = document.createElement('div');
   ov.className = 'overlay';
-  menuEditDraft = { weekImgs: menuWeekImgs(weekOff).slice(0, 6) };   // 草稿：整周菜谱照片（多张，异步压缩，保存时统一落盘）
-  const rowsHtml = [1,2,3,4,5,6,7].map(d=>{
+  if(!menuEditStash || typeof menuEditStash !== 'object') menuEditStash = {};
+  const stashed = menuEditStash[weekOff];
+  menuEditDraft = { weekImgs: ((stashed && stashed.weekImgs) || menuWeekImgs(weekOff)).slice(0, 6) };   // 草稿：整周菜谱照片（多张，异步压缩，保存时统一落盘）；切周回来优先用暂存
+  const valOf = (d, f)=>{
+    if(stashed && stashed.inputs && stashed.inputs[d] && stashed.inputs[d][f] != null) return stashed.inputs[d][f];
     const r = menuDayRows(d, weekOff);
-    menuEditDraft[d] = { lunch:r.lunch, dinner:r.dinner };
+    return f === 'lunch' ? r.lunch : r.dinner;
+  };
+  const rowsHtml = [1,2,3,4,5,6,7].map(d=>{
+    menuEditDraft[d] = { lunch:valOf(d,'lunch'), dinner:valOf(d,'dinner') };
     return `<div class="me-row">
       <span class="me-day">${TT_DN[d]}</span>
-      <span class="me-meal"><b>午餐</b><input class="me-in" data-d="${d}" data-f="lunch" maxlength="60" value="${esc(r.lunch)}" placeholder="如：番茄炒蛋"></span>
-      <span class="me-meal"><b>晚餐</b><input class="me-in" data-d="${d}" data-f="dinner" maxlength="60" value="${esc(r.dinner)}" placeholder="如：清蒸鱼+青菜"></span>
+      <span class="me-meal"><b>午餐</b><input class="me-in" data-d="${d}" data-f="lunch" maxlength="60" value="${esc(valOf(d,'lunch'))}" placeholder="如：番茄炒蛋"></span>
+      <span class="me-meal"><b>晚餐</b><input class="me-in" data-d="${d}" data-f="dinner" maxlength="60" value="${esc(valOf(d,'dinner'))}" placeholder="如：清蒸鱼+青菜"></span>
     </div>`;
   }).join('');
   const hasImgs = menuEditDraft.weekImgs.length > 0;
   ov.innerHTML = `
     <div class="modal menu-edit-modal">
       <h3>🍱 编辑${weekName}菜谱</h3>
+      <div style="display:flex;gap:6px;overflow-x:auto;padding:2px 0 6px;-webkit-overflow-scrolling:touch;">
+        ${[-2,-1,0,1,2].map(o=>{
+          const k = weekKeyOf(o);
+          const nm = o===0?'本周':o===1?'下周':o===-1?'上周':o===2?'下下周':'上上周';
+          const on = o===weekOff;
+          return `<button class="me-wk-chip${on?' on':''}" data-mo="${o}" type="button" title="${k}：${isoWeekRange(k)}" style="flex:0 0 auto;border:1.5px solid ${on?'var(--accent-d)':'var(--accent-soft)'};background:${on?'var(--accent-d)':'#fff'};color:${on?'#fff':'#4a6b8a'};border-radius:999px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">${nm}</button>`;
+        }).join('')}
+      </div>
       <p class="me-tip">正在编辑「${weekName}」<b>（${weekKeyOf(weekOff)}：${isoWeekRange(weekKeyOf(weekOff))}）</b>。拍学校发的一周菜谱表传上来最方便，可一次多选几张～也可以在下面每天填两个字。</p>
       ${clockSkewWarnHtml()}
       <div class="me-weekimg-row">
@@ -13346,9 +13361,25 @@ function menuEditPopup(off){
       </div>
     </div>`;
   document.body.appendChild(ov);
-  const close = ()=>{ ov.remove(); menuEditDraft = null; };
-  ov.querySelector('#meCancel').onclick = close;
+  const close = (keepStash)=>{ ov.remove(); menuEditDraft = null; if(!keepStash) menuEditStash = {}; };   // 取消/关闭：暂存一并丢弃；切周重开时 keepStash=true 保留
+  ov.querySelector('#meCancel').onclick = ()=> close();
   ov.onclick = (e)=>{ if(e.target===ov) close(); };
+  /* r248 周选择：把当前周已填内容暂存后重开目标周弹窗（切回时原样恢复） */
+  ov.querySelectorAll('.me-wk-chip').forEach(ch=>{
+    ch.onclick = ()=>{
+      const o = Number(ch.dataset.mo)||0;
+      if(o === weekOff) return;
+      const inputs = {};
+      ov.querySelectorAll('.me-in').forEach(inp=>{
+        const d = inp.dataset.d, f = inp.dataset.f;
+        if(!inputs[d]) inputs[d] = {};
+        inputs[d][f] = String(inp.value||'');
+      });
+      menuEditStash[weekOff] = { weekImgs: (menuEditDraft && menuEditDraft.weekImgs ? menuEditDraft.weekImgs : []).slice(0, 6), inputs };
+      close(true);
+      menuEditPopup(o);
+    };
+  });
   /* 落盘当前草稿（照片 + 七天文字），返回是否成功写入 */
   const applyDraft = ()=>{
     if(!menu.weeks[weekKeyOf(weekOff)]) menu.weeks[weekKeyOf(weekOff)] = { days:{} };
@@ -13362,6 +13393,29 @@ function menuEditPopup(off){
       if(!days[d]) days[d] = {};
       days[d][f] = String(inp.value || '').trim().slice(0, 60);
     });
+    /* r248：弹窗里切过周的，把其他周暂存的草稿一并落盘（保存一次=整份编辑成果都保存） */
+    if(menuEditStash && typeof menuEditStash === 'object'){
+      Object.keys(menuEditStash).forEach(k=>{
+        const o2 = Number(k);
+        if(!(o2 === o2)) return;               // NaN 防御
+        if(o2 === weekOff) return;             // 当前周已在上面落盘
+        const s2 = menuEditStash[o2];
+        if(!s2) return;
+        const k2 = weekKeyOf(o2);
+        if(!menu.weeks[k2]) menu.weeks[k2] = { days:{} };
+        const b2 = menu.weeks[k2];
+        const wi2 = (Array.isArray(s2.weekImgs) ? s2.weekImgs : []).filter(x=>x).slice(0, 6);
+        b2.imgs = wi2;
+        b2.img = wi2[0] || '';
+        [1,2,3,4,5,6,7].forEach(d=>{
+          const v = (s2.inputs && s2.inputs[d]) || {};
+          if(!b2.days[d]) b2.days[d] = {};
+          b2.days[d].lunch = String(v.lunch || '').trim().slice(0, 60);
+          b2.days[d].dinner = String(v.dinner || '').trim().slice(0, 60);
+        });
+      });
+      menuEditStash = {};
+    }
     return true;
   };
   /* 缩略图列表：每张带 ✕ 可单独删除 */
