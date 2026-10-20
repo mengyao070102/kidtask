@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609246" />
+<meta name="build-version" content="202609247" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -15229,7 +15229,7 @@ function bumpSyncTs(){ logicalTs = Math.max(logicalTs + 1, Date.now()); try { lo
    iPhone 的 UA 不含具体型号（系统限制），只能到 "iPhone"；安卓 UA 一般带真实机型代号。 */
 function deviceModelName(){
   try{
-    const cached = localStorage.getItem('kidtask_devname_v1');
+    const cached = localStorage.getItem('kidtask_devname_v2');
     if(cached) return cached;
   }catch(e){}
   const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
@@ -15237,14 +15237,22 @@ function deviceModelName(){
   if(/iPad/i.test(ua)) name = 'iPad';
   else if(/iPhone/i.test(ua)) name = 'iPhone';
   else if(/Android/i.test(ua)){
-    const m = ua.match(/Android\s[^;)]*;\s*([^;)]+?)(?:\s+Build\/\S+)?\s*(?:;\s|\))/i);
-    name = m ? m[1].trim().replace(/^wv\s+/i, '') : '';
+    /* r247：逐段扫描机型候选——部分厂商/WebView 的 UA 机型前带语言标记（如 "Android 12; zh-CN; 2210132C Build/..."），
+       旧正则一次捕获会误抓 'zh-CN'。跳过语言标记/wv/Build 段，取第一个像机型的段。 */
+    const m = ua.match(/Android\s[^;)]*;\s*([^)]+)\)?/i);
+    const segs = m ? m[1].split(';').map(s=>s.trim()) : [];
+    const isLocale = s => /^[a-z]{2,3}(-[a-z]{2,4})?$/i.test(s) || /^\w{2,3}[-_]\w{2,4}$/i.test(s);
+    for(const s of segs){
+      let c = s.replace(/\s+Build\/\S+$/i, '').trim();
+      if(!c || /^wv$/i.test(c) || /^Build$/i.test(c) || /^android$/i.test(c) || isLocale(c)) continue;
+      name = c; break;
+    }
     if(!name || name.length < 2 || /^android$/i.test(name)) name = '安卓设备';   // 'K' 是部分厂商 UA 占位符
   }
   else if(/Windows/i.test(ua)) name = 'Windows 电脑';
   else if(/Macintosh|Mac OS X/i.test(ua)) name = 'Mac';
   else name = '设备';
-  try{ localStorage.setItem('kidtask_devname_v1', name); }catch(e){}
+  try{ localStorage.setItem('kidtask_devname_v2', name); }catch(e){}
   return name;
 }
 /* 各端设备名映射表（随快照广播 devName，收端记住 id→名字），诊断面板/设备列表显示可读名 */
