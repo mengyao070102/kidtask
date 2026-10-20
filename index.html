@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609238" />
+<meta name="build-version" content="202609239" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -10260,7 +10260,7 @@ function hwCompressImage(file, maxSide, quality){
    为空时自动跳过 GitHub 跳，走免费图床回退链（freeimage → smms.app → sm.ms）；
    全部失败返回 ''，调用方保留 data:image 本地存（r206 甩图护栏兜底同步）。
    连续 3 次全链失败自动熔断本次会话（离线设备不再反复等待），断网恢复（online 事件）自动重置。 */
-let _imgUpFails = 0, _imgUpOff = false;   // 连续全链失败计数 / 熔断开关
+let _imgUpFails = 0, _imgUpOff = false, _upFailToastAt = 0;   // 连续全链失败计数 / 熔断开关 / 失败提示节流
 try { window.addEventListener('online', ()=>{ _imgUpFails = 0; _imgUpOff = false; }); } catch(e){}
 const MEDIA_REPO = 'mengyao070102/kidtask-media';
 /* ⚠️ token 绝不能硬编码进本文件：公开仓库会被 GitHub secret scanning 自动吊销（r209 实测）。
@@ -10357,7 +10357,11 @@ async function cloudUploadImage(dataUrl){
     if(!u) u = await _imgUploadOnce('https://sm.ms/api/v2/upload', blob, 'smfile', smParse);
     if(u){ _imgUpFails = 0; return u; }
     _imgUpFails++;
-    if(_imgUpFails >= 3){ _imgUpOff = true; try{ showToast('☁️ 照片上传服务暂不可用，先存本机（换设备后照片不同步）'); }catch(e){} }
+    /* 全链失败必须明确告知（r239）：以前是静默留本机——上传端看图一切正常，完全不知道其他设备看不到。
+       60 秒节流防多张连传刷屏。 */
+    let _upFailMsg = '⚠️ 照片没传上云，其他设备看不到哦（已存本机）。请到家长端「☁️ 照片云存储」配置或更新 token';
+    if(_imgUpFails >= 3){ _imgUpOff = true; _upFailMsg += '；本次会话暂停上传，连网后自动恢复'; }
+    try{ if(Date.now() - _upFailToastAt > 60000){ _upFailToastAt = Date.now(); showToast(_upFailMsg); } }catch(e){}
     return '';
   }catch(e){ return ''; }
 }
@@ -13305,6 +13309,27 @@ function menuEditPopup(off){
     });
   };
   paintWeekThumbs();
+  /* ☁️ 自动补传（r239）：之前上传失败留在本机的 data:image，等 token 配好后打开编辑弹窗就自动补传上云，
+     不用重新选图。逐张替换草稿并刷新缩略图，点「保存」后随同步通道把直链发给其他设备。
+     替换前核对原值，避免与用户手工删图的索引竞态。 */
+  (async ()=>{
+    try{
+      if(!MEDIA_TOKEN || !menuEditDraft) return;
+      let patched = 0;
+      for(let i = 0; i < menuEditDraft.weekImgs.length; i++){
+        if(!menuEditDraft) break;
+        const cur = menuEditDraft.weekImgs[i];
+        if(typeof cur !== 'string' || cur.indexOf('data:image') !== 0) continue;
+        const pb = ov.querySelector('#meWeekPhoto');
+        if(pb){ pb.disabled = true; pb.textContent = '☁️ 补传第 ' + (patched + 1) + ' 张…'; }
+        const up = await cloudUploadImage(cur);
+        if(!menuEditDraft) break;
+        if(up && menuEditDraft.weekImgs[i] === cur){ menuEditDraft.weekImgs[i] = up; patched++; paintWeekThumbs(); }
+        if(pb){ pb.disabled = false; pb.textContent = '📷 上传一周菜谱（已有 ' + menuEditDraft.weekImgs.length + ' 张）'; }
+      }
+      if(patched){ try{ showToast('☁️ 已把 ' + patched + ' 张本机照片补传上云，点「保存」即可同步到其他设备'); }catch(e){} }
+    }catch(e){}
+  })();
   /* 📷 上传一周菜谱照片（支持一次多选）：压缩到 900px/0.6（菜单表字要能看清，点开可放大），最多 6 张 */
   ov.querySelector('#meWeekPhoto').onclick = ()=> ov.querySelector('#meWeekFile').click();
   ov.querySelector('#meWeekFile').onchange = async ()=>{
