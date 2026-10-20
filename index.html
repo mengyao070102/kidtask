@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609244" />
+<meta name="build-version" content="202609246" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13055,6 +13055,26 @@ function isoWeekKey(dt){
   }catch(e){ return '1970-W01'; }
 }
 function weekKeyOf(off){ const dt = new Date(); dt.setDate(dt.getDate() + (Number(off)||0) * 7); return isoWeekKey(dt); }
+/* r245：周键 → 具体日期范围（'2026-W43' → '10月19日～10月25日'）。UTC 纯算术，不受时区影响；
+   让用户在卡片/弹窗里一眼看出「这周到底是哪几天」——设备时钟不准时立刻露馅 */
+function isoWeekRange(key){
+  const m = /^(\d{4})-W(\d{1,2})$/.exec(String(key||''));
+  if(!m) return '';
+  const y = +m[1], w = +m[2];
+  const jan4 = Date.UTC(y, 0, 4);                       // 1月4日恒在 ISO 第 1 周
+  const dow = new Date(jan4).getUTCDay() || 7;          // 周一=1
+  const monday = jan4 - (dow - 1) * 86400000 + (w - 1) * 7 * 86400000;
+  const s = new Date(monday), e = new Date(monday + 6 * 86400000);
+  return (s.getUTCMonth()+1)+'月'+s.getUTCDate()+'日～'+(e.getUTCMonth()+1)+'月'+e.getUTCDate()+'日';
+}
+/* r245：本机时钟偏差警告 HTML（启动校时探测的结果存 kidtask_clock_skew，24h 内有效；偏差 ≥10 分钟才警告） */
+function clockSkewWarnHtml(){
+  let skew = null;
+  try{ const v = JSON.parse(localStorage.getItem('kidtask_clock_skew')||'null'); if(v && typeof v.ms === 'number' && Date.now()-v.at < 24*3600*1000) skew = v.ms; }catch(e){}
+  if(skew == null || Math.abs(skew) < 10*60*1000) return '';
+  const desc = Math.abs(skew) >= 86400000 ? (Math.round(Math.abs(skew)/86400000*10)/10 + ' 天') : Math.max(1, Math.round(Math.abs(skew)/60000)) + ' 分钟';
+  return '<p style="color:#e5484d;font-weight:700;margin:6px 0 0;">⚠️ 本机时间比网络时间'+(skew>0?'慢':'快')+'约 '+desc+'——存菜谱可能进错周，请先校准系统时间（设置→通用→日期与时间→自动设置）！</p>';
+}
 function normalizeMenuDays(src){
   const days = {};
   for(let d=1; d<=7; d++){
@@ -13192,6 +13212,8 @@ function menuCardHtml(wd, off){
       </div>`;
     }
   }
+  const curKey = weekKeyOf(weekOff);
+  const curRange = isoWeekRange(curKey);
   return `
     <div class="mc-head">
       <span class="mc-title">🍱 ${weekName}菜谱</span>
@@ -13203,6 +13225,7 @@ function menuCardHtml(wd, off){
         ${canEdit ? '<button class="mc-edit" id="menuEditBtn" type="button">✏️ 编辑</button>' : ''}
       </span>
     </div>
+    ${curRange ? `<div style="font-size:11px;color:#8a97a8;margin:-2px 0 4px 2px;">📅 ${esc(curKey)}（${esc(curRange)}）</div>` : ''}
     ${bodyHtml}${adoptHtml}`;
 }
 /* 菜谱大图查看器：点击缩略图全屏预览 */
@@ -13308,7 +13331,8 @@ function menuEditPopup(off){
   ov.innerHTML = `
     <div class="modal menu-edit-modal">
       <h3>🍱 编辑${weekName}菜谱</h3>
-      <p class="me-tip">正在编辑「${weekName}」（${weekKeyOf(weekOff)}）。拍学校发的一周菜谱表传上来最方便，可一次多选几张～也可以在下面每天填两个字。</p>
+      <p class="me-tip">正在编辑「${weekName}」<b>（${weekKeyOf(weekOff)}：${isoWeekRange(weekKeyOf(weekOff))}）</b>。拍学校发的一周菜谱表传上来最方便，可一次多选几张～也可以在下面每天填两个字。</p>
+      ${clockSkewWarnHtml()}
       <div class="me-weekimg-row">
         <button class="me-weekphoto" id="meWeekPhoto" type="button">📷 上传一周菜谱${hasImgs?`（已有 ${menuEditDraft.weekImgs.length} 张）`:''}</button>
         <input type="file" id="meWeekFile" accept="image/*" multiple style="display:none;">
@@ -16138,6 +16162,8 @@ setInterval(checkBackend, 15000);
         var _srv = new Date(_d).getTime(); if(!_srv || isNaN(_srv)) return;
         var _rtt = Date.now() - _t0;
         var _skew = Math.abs(_srv + _rtt/2 - _t0);
+        /* r245：偏差结果持久化（kidtask_clock_skew，24h 有效），菜谱编辑弹窗据此显示红色时钟警告 */
+        try{ localStorage.setItem('kidtask_clock_skew', JSON.stringify({ ms: _srv + _rtt/2 - _t0, at: Date.now() })); }catch(e){}
         if(_skew > 15*60*1000){
           setTimeout(function(){ try{ showToast('⚠️ 这台手机的日期时间似乎不准（与网络时间相差约 '+Math.max(1,Math.round(_skew/60000))+' 分钟），可能导致「今日任务」显示异常，请校准系统时间'); }catch(e){} }, 1800);
         }
