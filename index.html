@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609250" />
+<meta name="build-version" content="202609251" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -13356,6 +13356,7 @@ function menuEditPopup(off){
       <div class="me-table">${rowsHtml}</div>
       <div class="modal-actions">
         <button class="btn cancel" id="meCancel">取消</button>
+        ${deviceRole !== 'child' ? '<button class="btn" id="meClean" style="background:#fff;color:#c0392b;border:1.5px solid #f3c1ba;font-size:12px;padding:7px 10px;">🧹 清除历史周</button>' : ''}
         <button class="btn" id="meSync" style="background:var(--accent-d);color:#fff;">📤 立即同步</button>
         <button class="btn primary" id="meOk">保存</button>
       </div>
@@ -13483,6 +13484,33 @@ function menuEditPopup(off){
   };
   /* 📤 立即同步：保存草稿后强制立即发布（绕过自动同步的防抖/静默跳过），同时向其他设备拉取对齐。
      自动推送偶尔因「未连接/应用远端中」被静默跳过，这里给一个手动补推入口（与课程表同款）。 */
+  /* 🧹 清除历史周菜谱（r251）：删除本周/下周以外的所有周桶（含存错周的旧记录），二次确认，保存后全端同步 */
+  const meClean = ov.querySelector('#meClean');
+  if(meClean) meClean.onclick = ()=>{
+    const curKey = weekKeyOf(0), nextKey = weekKeyOf(1);
+    const histKeys = Object.keys(menu.weeks || {}).filter(k => k !== curKey && k !== nextKey);
+    if(!histKeys.length){ try{ showToast('没有历史周的菜谱记录，很干净啦～'); }catch(e){} return; }
+    let imgN = 0, dayN = 0;
+    histKeys.forEach(k => {
+      const b = menu.weeks[k] || {};
+      imgN += (Array.isArray(b.imgs) ? b.imgs.length : (b.img ? 1 : 0));
+      Object.keys(b.days || {}).forEach(d => { const dd = b.days[d] || {}; if((dd.lunch||'').trim() || (dd.dinner||'').trim()) dayN++; });
+    });
+    confirmModal({
+      title: '🧹 清除历史周菜谱？',
+      message: '将删除 ' + histKeys.length + ' 个历史周（' + histKeys.join('、') + '）的菜谱记录：' + dayN + ' 天的文字、' + imgN + ' 张照片。本周和下周的菜谱不受影响，删除后同步到所有设备，无法撤销。',
+      confirmText: '清除',
+      cancelText: '再想想',
+      danger: true,
+      onConfirm: ()=>{
+        histKeys.forEach(k => { delete menu.weeks[k]; });
+        menuEditStash = {};   // 暂存里如有历史周草稿一并作废
+        saveMenu();
+        close(); render();
+        try{ showToast('🧹 已清除 ' + histKeys.length + ' 个历史周（' + dayN + ' 天文字、' + imgN + ' 张照片），并同步到其他设备'); }catch(e){}
+      }
+    });
+  };
   ov.querySelector('#meSync').onclick = ()=>{
     applyDraft();
     saveMenu();   // 落盘 + touchMenuTs + 常规 pushSync（自动刷新首页卡片）
