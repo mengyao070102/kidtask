@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609254" />
+<meta name="build-version" content="202609255" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1837,18 +1837,18 @@
   .points-entry .pe-right b { font-size: 26px; color:#000; }
   .points-entry .pe-tip { font-size:13px; color:rgba(0,0,0,0.55); font-weight:600; }
   .points-entry .link-btn { color:var(--accent-d); font-weight:900; text-decoration:underline; }
-  /* r254 首页精简：积分+星星双列合一；年级/学期收纳为胶囊+弹出面板 */
+  /* r254 首页精简：积分+星星双列合一；r255 数字与按钮恒同一行（标签在上） */
   .points-duo { display:flex; gap:10px; margin-bottom: 18px; }
   .points-duo .pd-cell {
-    flex:1; display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0;
-    background: var(--accent-hover); border: 2px solid var(--accent-soft); border-radius: 18px; padding: 12px 16px;
+    flex:1; min-width:0; display:flex; flex-direction:column; align-items:flex-start; gap:2px;
+    background: var(--accent-hover); border: 2px solid var(--accent-soft); border-radius: 18px; padding: 10px 14px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.10);
   }
-  .points-duo .pe-left { font-weight: 900; font-size: 16px; color:#2a2a2a; white-space:nowrap; }
-  .points-duo .pe-right { font-weight: 800; font-size: 15px; color:#444; display:flex; align-items:center; gap:6px; }
-  .points-duo .pe-right b { font-size: 22px; color:#000; }
-  .points-duo .pe-tip { font-size:12px; color:rgba(0,0,0,0.55); font-weight:600; }
-  .points-duo .link-btn { color:var(--accent-d); font-weight:900; text-decoration:underline; }
+  .points-duo .pd-top { font-weight: 900; font-size: 13px; color:#2a2a2a; white-space:nowrap; }
+  .points-duo .pd-val { display:flex; align-items:baseline; gap:8px; white-space:nowrap; max-width:100%; }
+  .points-duo .pd-val b { font-size: 26px; color:#000; flex-shrink:0; }
+  .points-duo .pd-val .link-btn { color:var(--accent-d); font-weight:900; text-decoration:underline; white-space:nowrap; flex-shrink:1; min-width:0; }
+  .points-duo .pd-val .pe-tip { font-size:12px; color:rgba(0,0,0,0.55); font-weight:600; white-space:nowrap; }
   .grade-wrap { position: relative; flex: 0 0 auto; }
   .grade-quick {
     border: 2px solid var(--accent-soft); background:#fff; color:#4a6b8a; border-radius: 999px;
@@ -4430,8 +4430,8 @@ function renderHome(){
     ${restoreHintHtml}
     ${writeTipHtml}
     <div class="points-duo">
-      <div class="pd-cell"><span class="pe-left">⭐ 积分</span><span class="pe-right"><b>${bal}</b><button class="link-btn" id="goRewards">兑换 ›</button></span></div>
-      <div class="pd-cell"><span class="pe-left">🌟 星星</span><span class="pe-right"><b>${stars}</b><span class="pe-tip">摇骰子用</span></span></div>
+      <div class="pd-cell"><span class="pd-top">⭐ 积分</span><span class="pd-val"><b>${bal}</b><button class="link-btn" id="goRewards">兑换 ›</button></span></div>
+      <div class="pd-cell"><span class="pd-top">🌟 星星</span><span class="pd-val"><b>${stars}</b><span class="pe-tip">摇骰子用</span></span></div>
     </div>
     ${recoverableTotal('point')>0 ? `
     <div class="points-entry recov-entry recov-under">
