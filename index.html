@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609255" />
+<meta name="build-version" content="202609256" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1868,6 +1868,17 @@
   .stat.s4 .num { color:#a07a8a; }
   .done-banner { display:flex; align-items:center; gap:6px; background:linear-gradient(135deg,var(--accent-hover),var(--accent-soft)); color:#9a6b2a; font-weight:800; font-size:16px; padding:14px 18px; border-radius:16px; margin-bottom:18px; box-shadow:var(--shadow); }
   .done-banner b { font-size:22px; color:var(--accent); margin:0 2px; }
+  /* r256 首页：今日任务全部完成的庆祝横幅（大字版） */
+  .alldone-banner {
+    display:flex; align-items:center; gap:12px; margin:10px 0 6px; padding:16px 18px;
+    background:linear-gradient(135deg,var(--accent-hover),var(--accent-soft)); border:2px solid var(--accent-soft);
+    border-radius:18px; box-shadow:var(--shadow); font-size:19px; font-weight:900; color:#7a4a2a;
+  }
+  .alldone-banner .ad-big { font-size:34px; line-height:1; }
+  .alldone-banner .ad-sub { display:block; font-size:13px; font-weight:700; color:#9a6b2a; margin-top:3px; }
+  /* r256 首页：校内作业空态紧凑条 */
+  .empty.small.hw-empty { padding:12px 12px; font-size:14px; }
+  .empty.small.hw-empty .big { font-size:26px; display:inline-block; margin:0 8px 0 0; vertical-align:middle; }
 
   /* ===== 当日完成进度看板 ===== */
   .board-date { font-size: 15px; font-weight: 700; color:#9c7b8e; background:#ffeaf1; border-radius: 999px; padding: 3px 12px; margin-left: 6px; }
@@ -4426,7 +4437,7 @@ function renderHome(){
         </div>
       </div>
     </div>
-    <p class="page-sub">今天也要加油哦～ 想加新任务，找爸爸妈妈在「家长审核」里加～</p>
+    <p class="page-sub" style="font-size:15px;font-weight:700;margin:0 0 10px;">今天也要加油哦～ 想加新任务，找爸爸妈妈在「家长审核」里加～</p>
     ${restoreHintHtml}
     ${writeTipHtml}
     <div class="points-duo">
@@ -4485,6 +4496,12 @@ function renderHome(){
   summary.className = 'task-summary';
   summary.innerHTML = `全部 <b id="badgeAll">0</b> · 已完成 <b id="badgeDone">0</b> · 待处理 <b id="badgePending">0</b>`;
   tl.appendChild(summary);
+  if(tdTotal>0 && tdPending===0){   // r256：今日任务全部完成 → 大字庆祝横幅
+    const ad = document.createElement('div');
+    ad.className = 'alldone-banner';
+    ad.innerHTML = '<span class="ad-big">🎉</span><span>今天的任务全部完成啦！<span class="ad-sub">太棒了，去领奖励或玩一会儿吧～</span></span>';
+    tl.appendChild(ad);
+  }
   if(tdTotal===0){
     let emptyMsg = '<span class="big">🗒️</span>今天还没有任务哦，去「家长审核」让爸爸妈妈加一个吧～';
     const _fc = familyCode || getFamilyCode();
@@ -14415,7 +14432,7 @@ function prependHwHome(tl, todayIso){
   hint.style.marginTop = '18px';
   tl.appendChild(hint);
   if(!items.length){
-    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty small', innerHTML:'<span class="big">🎒</span>今天暂无校内作业，家长可在「家长审核 → 📚 校内作业」布置～'}));
+    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty small hw-empty', innerHTML:'<span class="big">🎒</span>今天暂无校内作业，家长可在「家长审核 → 📚 校内作业」布置～'}));
     return;
   }
   const box = document.createElement('div');
