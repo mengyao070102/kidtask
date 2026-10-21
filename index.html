@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609257" />
+<meta name="build-version" content="202609258" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -2796,12 +2796,23 @@
 
   /* 首页「今日任务」方块板块 */
   .task-board { display:flex; flex-wrap:wrap; gap:12px; margin-top:14px; }
-  .task-summary { font-size:16px; font-weight:800; color:#9a6a7e; margin:6px 0 0; }
-  .task-summary b { color:var(--accent); font-size:19px; }
-  /* r257：待处理红显（>0 时数字+标签红色） */
-  .task-summary .ts-pend { color:#e5484d; }
-  .task-summary .ts-pend b { color:#e5484d; }
-  .task-summary .ts-pend.zero, .task-summary .ts-pend.zero b { color:#b9a4b0; }
+  /* r258：今日任务摘要 → 彩色胶囊筛选器（全部/已完成/待处理，可点击过滤） */
+  .task-summary { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 0; }
+  .ts-chip {
+    appearance:none; -webkit-appearance:none; border:2px solid var(--accent-soft); background:#fff; border-radius:999px;
+    padding:7px 14px; font:inherit; font-size:14px; font-weight:800; color:#7a5a6a; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px; transition:transform .08s, background .15s, border-color .15s;
+  }
+  .ts-chip:active { transform:scale(.96); }
+  .ts-chip b { font-size:17px; color:var(--accent); }
+  .ts-chip.on { background:var(--accent-soft); border-color:var(--accent-d); color:var(--accent-d); box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .ts-chip.ts-done b { color:#2f8f63; }
+  .ts-chip.ts-done.on { background:#e6f6ec; border-color:#2f8f63; color:#2f8f63; }
+  .ts-chip.ts-pend { border-color:#f3c1c3; }
+  .ts-chip.ts-pend b { color:#e5484d; }
+  .ts-chip.ts-pend.on { background:#fdecec; border-color:#e5484d; color:#e5484d; }
+  .ts-chip.ts-pend.zero, .ts-chip.ts-pend.zero b { color:#b9a4b0; }
+  .ts-chip.ts-pend.zero { border-color:#e3d8de; background:#faf6f8; }
   .task-block {
     position:relative;
     appearance:none; -webkit-appearance:none; -webkit-tap-highlight-color:transparent; outline:none;
@@ -4498,7 +4509,9 @@ function renderHome(){
   tl.appendChild(hint);
   const summary = document.createElement('div');
   summary.className = 'task-summary';
-  summary.innerHTML = `全部 <b id="badgeAll">0</b> · 已完成 <b id="badgeDone">0</b> · <span class="ts-pend zero" id="tsPend">待处理 <b id="badgePending">0</b></span>`;
+  summary.innerHTML = `<button class="ts-chip on" data-f="all" type="button">全部 <b id="badgeAll">0</b></button>` +
+    `<button class="ts-chip ts-done" data-f="done" type="button">✅ 已完成 <b id="badgeDone">0</b></button>` +
+    `<button class="ts-chip ts-pend zero" id="tsPend" data-f="pend" type="button">⏳ 待处理 <b id="badgePending">0</b></button>`;
   tl.appendChild(summary);
   if(tdTotal>0 && tdPending===0){   // r256：今日任务全部完成 → 大字庆祝横幅
     const ad = document.createElement('div');
@@ -4520,8 +4533,25 @@ function renderHome(){
     const board = document.createElement('div');
     board.className = 'task-board';
     tl.appendChild(board);
-    td.filter(t=>taskVisible(t)).forEach(t=>{
-      board.appendChild(taskBlock(t, today.date, true, true));   // 首页今日任务：简洁卡片（仅名称），点击弹「完成/撤销」确认弹窗
+    const visible = td.filter(t=>taskVisible(t));
+    let curFilter = 'all';   // r258：胶囊筛选 all/done/pend
+    const paintBoard = ()=>{
+      board.innerHTML = '';
+      visible.forEach(t=>{
+        const dn = doneOnDay(t, today.date);
+        if(curFilter==='done' && !dn) return;
+        if(curFilter==='pend' && (dn || t.cancelled)) return;
+        board.appendChild(taskBlock(t, today.date, true, true));   // 首页今日任务：简洁卡片（仅名称），点击弹「完成/撤销」确认弹窗
+      });
+      if(!board.children.length) board.innerHTML = '<div class="empty small" style="padding:14px 10px;"><span class="big" style="font-size:26px;display:inline-block;margin:0 8px 0 0;vertical-align:middle;">🌵</span>这里空空的，换个分类看看吧～</div>';
+    };
+    paintBoard();
+    summary.querySelectorAll('.ts-chip').forEach(ch=>{
+      ch.onclick = ()=>{
+        curFilter = ch.dataset.f;
+        summary.querySelectorAll('.ts-chip').forEach(x=>x.classList.toggle('on', x===ch));
+        paintBoard();
+      };
     });
   }
   const allC = td.length;
