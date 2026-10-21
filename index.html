@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609253" />
+<meta name="build-version" content="202609254" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1837,6 +1837,32 @@
   .points-entry .pe-right b { font-size: 26px; color:#000; }
   .points-entry .pe-tip { font-size:13px; color:rgba(0,0,0,0.55); font-weight:600; }
   .points-entry .link-btn { color:var(--accent-d); font-weight:900; text-decoration:underline; }
+  /* r254 首页精简：积分+星星双列合一；年级/学期收纳为胶囊+弹出面板 */
+  .points-duo { display:flex; gap:10px; margin-bottom: 18px; }
+  .points-duo .pd-cell {
+    flex:1; display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0;
+    background: var(--accent-hover); border: 2px solid var(--accent-soft); border-radius: 18px; padding: 12px 16px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.10);
+  }
+  .points-duo .pe-left { font-weight: 900; font-size: 16px; color:#2a2a2a; white-space:nowrap; }
+  .points-duo .pe-right { font-weight: 800; font-size: 15px; color:#444; display:flex; align-items:center; gap:6px; }
+  .points-duo .pe-right b { font-size: 22px; color:#000; }
+  .points-duo .pe-tip { font-size:12px; color:rgba(0,0,0,0.55); font-weight:600; }
+  .points-duo .link-btn { color:var(--accent-d); font-weight:900; text-decoration:underline; }
+  .grade-wrap { position: relative; flex: 0 0 auto; }
+  .grade-quick {
+    border: 2px solid var(--accent-soft); background:#fff; color:#4a6b8a; border-radius: 999px;
+    padding: 6px 14px; font-size: 13px; font-weight: 800; cursor: pointer; white-space: nowrap;
+  }
+  .grade-quick:active { background: var(--accent-soft); }
+  .grade-pop {
+    display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+    background:#fff; border: 2px solid var(--accent-soft); border-radius: 16px; padding: 12px 14px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.16); min-width: 210px;
+  }
+  .grade-pop.show { display: block; }
+  .grade-pop .gs-grade { display:flex; align-items:center; justify-content:center; gap: 10px; margin-bottom: 8px; }
+  .grade-pop .gs-sem { display:flex; gap: 6px; justify-content:center; }
   .stat.s2 .num { color:#5ba7d0; }
   .stat.s3 .num { color:#5fb896; }
   .stat.s4 .num { color:#a07a8a; }
@@ -4386,23 +4412,26 @@ function renderHome(){
   main.innerHTML = `
     <div class="home-head">
       <h1 class="page-title">🌸 你好呀，伊伊小公主！</h1>
-      <div class="grade-switch">
-        <div class="gs-grade">
-          <button class="g-arrow" id="gPrev" title="下降一个年级">◀</button>
-          <span class="g-current" id="gCur">${gradeName(grade)}</span>
-          <button class="g-arrow" id="gNext" title="上升一个年级">▶</button>
-        </div>
-        <div class="gs-sem" id="gSem">
-          ${SEMESTERS.map(s=>`<button class="sem-btn ${s===semester?'sel':''}" data-s="${s}">${s}</button>`).join('')}
+      <div class="grade-wrap">
+        <button class="grade-quick" id="gradeQuick" type="button">📚 ${gradeName(grade)} · ${semester} ▾</button>
+        <div class="grade-pop" id="gradePop">
+          <div class="gs-grade">
+            <button class="g-arrow" id="gPrev" title="下降一个年级">◀</button>
+            <span class="g-current" id="gCur">${gradeName(grade)}</span>
+            <button class="g-arrow" id="gNext" title="上升一个年级">▶</button>
+          </div>
+          <div class="gs-sem" id="gSem">
+            ${SEMESTERS.map(s=>`<button class="sem-btn ${s===semester?'sel':''}" data-s="${s}">${s}</button>`).join('')}
+          </div>
         </div>
       </div>
     </div>
-    <p class="page-sub">今天也要加油完成任务，收集更多积分哦～ 想添加任务请让家长在「家长审核」页操作～</p>
+    <p class="page-sub">今天也要加油哦～ 想加新任务，找爸爸妈妈在「家长审核」里加～</p>
     ${restoreHintHtml}
     ${writeTipHtml}
-    <div class="points-entry">
-      <div class="pe-left">⭐ 我的积分</div>
-      <div class="pe-right"><b>${bal}</b> 分 <button class="link-btn" id="goRewards">去兑换 ›</button></div>
+    <div class="points-duo">
+      <div class="pd-cell"><span class="pe-left">⭐ 积分</span><span class="pe-right"><b>${bal}</b><button class="link-btn" id="goRewards">兑换 ›</button></span></div>
+      <div class="pd-cell"><span class="pe-left">🌟 星星</span><span class="pe-right"><b>${stars}</b><span class="pe-tip">摇骰子用</span></span></div>
     </div>
     ${recoverableTotal('point')>0 ? `
     <div class="points-entry recov-entry recov-under">
@@ -4410,10 +4439,6 @@ function renderHome(){
       <div class="pe-right">还有 <b>${recoverableTotal('point')}</b> 分可恢复 <button class="link-btn gd-rec-btn" data-kind="point">去恢复 ›</button></div>
       <div class="pe-rec-tip">请注意扣除原因：【${recoverReasonsTxt('point')}】，无法恢复哦</div>
     </div>` : ''}
-    <div class="points-entry">
-      <div class="pe-left">🌟 我的星星</div>
-      <div class="pe-right"><b>${stars}</b> 颗 <span class="pe-tip">可用来摇骰子</span></div>
-    </div>
     ${recoverableTotal('star')>0 ? `
     <div class="points-entry recov-entry recov-under">
       <div class="pe-left">♻️ 星星恢复</div>
@@ -4421,22 +4446,31 @@ function renderHome(){
       <div class="pe-rec-tip">请注意扣除原因：【${recoverReasonsTxt('star')}】，无法恢复哦</div>
     </div>` : ''}
     ${checkinHtml()}
-    <div class="stats">
-      <div class="stat s1"><div class="num">${total}</div><div class="lab">任务总数</div></div>
-      <div class="stat s2"><div class="num">${pending}</div><div class="lab">未完成</div></div>
-      <div class="stat s3"><div class="num">${done}</div><div class="lab">已完成 ⭐</div></div>
-      <div class="stat s4"><div class="num">${cancelled}</div><div class="lab">已取消</div></div>
-    </div>
     <div id="todayList"></div>`;
 
-  // 年级 / 学期切换
+  // 年级 / 学期切换（r254：收纳为胶囊+弹出面板，点外部收起，切换后更新胶囊文本）
+  const gqBtn = document.getElementById('gradeQuick');
+  const gPop = document.getElementById('gradePop');
+  const syncGradeQuick = ()=>{
+    if(gqBtn) gqBtn.textContent = '📚 ' + gradeName(grade) + ' · ' + semester + ' ▾';
+    const gcur = document.getElementById('gCur'); if(gcur) gcur.textContent = gradeName(grade);
+  };
+  const closeGradePop = ()=>{ if(gPop) gPop.classList.remove('show'); };
+  if(gqBtn && gPop){
+    gqBtn.onclick = (e)=>{ e.stopPropagation(); gPop.classList.toggle('show'); };
+    document.addEventListener('click', (e)=>{
+      if(!gPop.classList.contains('show')) return;
+      if(gPop.contains(e.target) || e.target === gqBtn) return;
+      closeGradePop();
+    });
+  }
   const gi = GRADES.indexOf(grade);
   const gPrev = document.getElementById('gPrev');
   const gNext = document.getElementById('gNext');
-  if(gPrev){ gPrev.disabled = gi<=0; gPrev.onclick = ()=>{ if(gi>0){ grade=GRADES[gi-1]; localStorage.setItem(GKEY, grade); touchMeta('g'); onGradeChanged(); pushSync(); render(); } }; }
-  if(gNext){ gNext.disabled = gi>=GRADES.length-1; gNext.onclick = ()=>{ if(gi<GRADES.length-1){ grade=GRADES[gi+1]; localStorage.setItem(GKEY, grade); touchMeta('g'); onGradeChanged(); pushSync(); render(); } }; }
+  if(gPrev){ gPrev.disabled = gi<=0; gPrev.onclick = ()=>{ if(gi>0){ grade=GRADES[gi-1]; localStorage.setItem(GKEY, grade); touchMeta('g'); onGradeChanged(); pushSync(); syncGradeQuick(); const ni=GRADES.indexOf(grade); gPrev.disabled = ni<=0; gNext.disabled = ni>=GRADES.length-1; } }; }
+  if(gNext){ gNext.disabled = gi>=GRADES.length-1; gNext.onclick = ()=>{ if(gi<GRADES.length-1){ grade=GRADES[gi+1]; localStorage.setItem(GKEY, grade); touchMeta('g'); onGradeChanged(); pushSync(); syncGradeQuick(); const ni=GRADES.indexOf(grade); gPrev.disabled = ni<=0; gNext.disabled = ni>=GRADES.length-1; } }; }
   main.querySelectorAll('#gSem .sem-btn').forEach(b=>{
-    b.onclick = ()=>{ semester=b.dataset.s; localStorage.setItem(SKEY, semester); touchMeta('s'); pushSync(); render(); };
+    b.onclick = ()=>{ semester=b.dataset.s; localStorage.setItem(SKEY, semester); touchMeta('s'); pushSync(); syncGradeQuick(); closeGradePop(); };
   });
   main.querySelectorAll('.gd-rec-btn').forEach(b=>{ b.onclick = ()=> openRecoverModal(b.dataset.kind); });
 
