@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609259" />
+<meta name="build-version" content="202609261" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1519,18 +1519,15 @@
   .hw-grp { background:var(--card-bg, rgba(255,255,255,.6)); border:2px solid var(--accent-soft); border-radius:16px; padding:10px 12px; margin-bottom:10px; }
   .hw-grp-h { font-weight:800; font-size:13.5px; color:var(--title); margin-bottom:4px; display:flex; align-items:center; gap:6px; }
   .hw-grp-cnt { font-size:11px; font-weight:800; background:var(--accent-soft); color:var(--title); border-radius:999px; padding:1px 8px; }
-  /* r259：校内作业显示周期切换 + 多日分组标题 */
-  .hw-range-sw { display:inline-flex; gap:4px; }
+  /* r260：作业可见日期 chips（.hw-range-btn 复用）+ 编辑器容器 */
   .hw-range-btn {
     appearance:none; -webkit-appearance:none; border:2px solid var(--accent-soft); background:#fff; border-radius:999px;
     padding:3px 11px; font:inherit; font-size:12px; font-weight:800; color:#8a6a7a; cursor:pointer; white-space:nowrap;
   }
   .hw-range-btn.on { background:var(--accent-d); border-color:var(--accent-d); color:#fff; }
-  .hw-day-h {
-    display:flex; align-items:center; gap:6px; font-size:14px; font-weight:900; color:var(--title, #7a4a5e);
-    margin:12px 0 6px; padding-left:2px;
-  }
-  .hw-day-h .hw-day-ico { font-size:16px; }
+  .hw-vis-row { align-items:center; }
+  .hw-vis-row .hw-range-btn { padding:2px 9px; font-size:11.5px; }
+  .hw-vis-lab { font-size:12px; font-weight:800; color:var(--title); flex:none; }
   .hw-row { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:10px; cursor:pointer; transition:background .15s; }
   .hw-row:active { background:var(--accent-soft); }
   .hw-row-title { flex:1; font-size:13.5px; font-weight:700; color:var(--ink); word-break:break-all; }
@@ -13961,7 +13958,7 @@ function renderParent(){
     <section class="collapse-panel" data-pid="homework" data-open="${openPanels.has('homework')?'true':'false'}">
       <button class="collapse-head" type="button" data-pid="homework"><span class="ch-title">📚 校内作业</span><span class="ch-chevron">▸</span></button>
       <div class="collapse-body">
-        <p class="page-sub" style="margin-top:0;">布置每天的校内作业：写好科目和作业名称保存后，AI 会自动生成作业明细；标题含「听写/生词/单词」时 AI 还会自动出听写词表，孩子端首页和「校内任务」对应日期都会显示，并可点 🎧 自动听写。</p>
+        <p class="page-sub" style="margin-top:0;">布置校内作业：写好科目和作业名称保存后，AI 会自动生成作业明细；标题含「听写/生词/单词」时 AI 还会自动出听写词表，孩子端首页和「校内任务」对应日期都会显示，并可点 🎧 自动听写。每条作业可用「📅 可见」多选日期（今天/明天/…），选了哪些天那些天都会显示；孩子端首页固定只显示当天的。</p>
         <div class="hw-date-row">📅 日期 <input type="date" id="hwDate"></div>
         <div id="hwEditBox"></div>
       </div>
@@ -14383,7 +14380,22 @@ function saveHW(){
   touchHwTs();
   try{ pushSync(); }catch(e){}
 }
-function hwItems(iso){ const d = hw[iso]; return (d && Array.isArray(d.items)) ? d.items : []; }
+/* r260：hwItems(iso) = 所有「可见日期包含 iso」的条目。
+   条目仍存放在创建日（宿主桶）里，新增 dates:['YYYY-MM-DD',...] 表示在哪些天可见；
+   老数据无 dates 字段 → 仅宿主桶当天可见（完全向后兼容）。同 id 去重防合并中间态双显。 */
+function hwItems(iso){
+  const out = []; const seen = {};
+  Object.keys(hw).sort().forEach(d => {
+    const b = hw[d];
+    if(!b || !Array.isArray(b.items)) return;
+    b.items.forEach(it => {
+      if(!it || !it.id || seen[it.id]) return;
+      const vis = Array.isArray(it.dates) && it.dates.length ? it.dates : null;
+      if(vis ? vis.indexOf(iso) >= 0 : (d === iso)){ seen[it.id] = 1; out.push(it); }
+    });
+  });
+  return out;
+}
 /* 校内作业合并（按日期桶 + 删除墓碑）：
    旧方案是整包 hwTs last-writer-wins——孩子端打勾/听写会频繁回写整包，若其旧包在家长删除后才到达（离线/推送在途），
    会以更新的 hwTs 覆盖删除 → 已删条目复活。
@@ -14472,72 +14484,26 @@ function hwHomeRow(iso, it, seq){
   </div>`;
 }
 /* 首页：📚 今日校内作业（插在 📌 今日任务 之前）—— 科目分组 + 可点击完成任务列表 */
-/* r259：校内作业显示时间周期（1=今天 / 3=近3天 / 7=本周7天；本机显示偏好，localStorage） */
-function hwShowDaysGet(){
-  let n = 1;
-  try{ n = Number(localStorage.getItem('kidtask_hw_show_days')) || 1; }catch(e){}
-  return [1,3,7].indexOf(n) >= 0 ? n : 1;
-}
-function hwShowDaysSet(n){
-  try{ localStorage.setItem('kidtask_hw_show_days', String(n)); }catch(e){}
-}
-function hwDayLabel(d, i){
-  if(i === 0) return '今天';
-  if(i === 1) return '明天';
-  const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
-  return (d.getMonth()+1) + '月' + d.getDate() + '日 · ' + wd;
-}
+/* r260：首页固定只显示当天的作业；哪些天可见由家长布置时在编辑器「📅 显示日期」里选 */
 function prependHwHome(tl, todayIso){
-  const days = hwShowDaysGet();
   const hint = document.createElement('div');
   hint.className = 'section-h';
-  hint.style.cssText = 'margin-top:18px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;';
-  const titleSpan = document.createElement('span');
-  hint.appendChild(titleSpan);
-  const sw = document.createElement('span');
-  sw.className = 'hw-range-sw';
-  sw.innerHTML = [1,3,7].map(n => `<button class="hw-range-btn${n===days?' on':''}" data-n="${n}" type="button">${n===1?'今天':n===3?'近3天':'近7天'}</button>`).join('');
-  hint.appendChild(sw);
+  hint.style.cssText = 'margin-top:18px;';
+  hint.textContent = '📚 今日校内作业';
   tl.appendChild(hint);
-  /* 收集时间范围内的各天作业（只显示有内容的日子） */
-  const buckets = [];
-  for(let i = 0; i < days; i++){
-    const d = new Date(todayIso.replace(/-/g, '/') + ' 12:00:00'); d.setDate(d.getDate() + i);
-    const iso = fmtISO(d);
-    const items = hwItems(iso);
-    if(items.length) buckets.push({ iso, d, items, i });
-  }
-  const total = buckets.reduce((s, b) => s + b.items.length, 0);
-  titleSpan.textContent = (days === 1 ? '📚 今日校内作业' : `📚 校内作业（${days===3?'近3天':'本周'}）`) + (total ? `（${total} 项）` : '');
-  if(!total){
-    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty small hw-empty', innerHTML:'<span class="big">🎒</span>' + (days===1?'今天暂无校内作业':'时间范围内暂无校内作业') + '，家长可在「家长审核 → 📚 校内作业」布置～'}));
+  const items = hwItems(todayIso);
+  if(!items.length){
+    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty small hw-empty', innerHTML:'<span class="big">🎒</span>今天暂无校内作业，家长可在「家长审核 → 📚 校内作业」布置～'}));
   } else {
-    buckets.forEach(b => {
-      if(days > 1){
-        const dh = document.createElement('div');
-        dh.className = 'hw-day-h';
-        dh.innerHTML = `<span class="hw-day-ico">${b.i===0?'📍':b.i===1?'🌅':'📅'}</span>${esc(hwDayLabel(b.d, b.i))}<span class="hw-grp-cnt">${b.items.length} 项</span>`;
-        tl.appendChild(dh);
-      }
-      const box = document.createElement('div');
-      box.innerHTML = hwSubjectGroups(b.items).map(g => `
-        <div class="hw-grp">
-          <div class="hw-grp-h">${hwSubEmoji(g.sub)} ${esc(g.sub)}<span class="hw-grp-cnt">${g.items.length}</span></div>
-          ${g.items.map((it, k) => hwHomeRow(b.iso, it, k + 1)).join('')}
-        </div>`).join('');
-      while(box.firstChild) tl.appendChild(box.firstChild);
-    });
+    const box = document.createElement('div');
+    box.innerHTML = hwSubjectGroups(items).map(g => `
+      <div class="hw-grp">
+        <div class="hw-grp-h">${hwSubEmoji(g.sub)} ${esc(g.sub)}<span class="hw-grp-cnt">${g.items.length}</span></div>
+        ${g.items.map((it, k) => hwHomeRow(todayIso, it, k + 1)).join('')}
+      </div>`).join('');
+    while(box.firstChild) tl.appendChild(box.firstChild);
     bindHwDictBtns(tl);
   }
-  /* 切换显示周期（本机偏好，立即重渲） */
-  sw.querySelectorAll('.hw-range-btn').forEach(btn => {
-    btn.onclick = () => {
-      const n = Number(btn.dataset.n) || 1;
-      if(n === hwShowDaysGet()) return;
-      hwShowDaysSet(n);
-      render();
-    };
-  });
 }
 /* 校内页：对应日期展示（插在当天任务面板之后） */
 function appendHwSchoolDay(selISO){
@@ -14588,19 +14554,69 @@ ${hwIsDictation(it) ? '这份作业和听写有关，请同时出词表。' : ''
   }
 }
 /* 家长编辑器状态（家长审核页内） */
-let hwEdit = null;   // { date:'YYYY-MM-DD', items:[...], oldIds:[...] }
+let hwEdit = null;   // { date:'YYYY-MM-DD', items:[...（含 _dates 可见日期草稿 / _home 宿主桶）], oldIds:[...], homeMap:{id:宿主桶} }
 function hwEditLoad(dateISO){
-  const items = hwItems(dateISO).map(it => {
+  const seen = {}; const items = []; const homeMap = {};
+  const push = (it, home) => {
+    if(!it || !it.id || seen[it.id]) return;
+    seen[it.id] = 1;
     const c = JSON.parse(JSON.stringify(it));
+    c._home = home; homeMap[c.id] = home;
+    /* 每条作业各自的可见日期草稿：已有 dates 沿用；老数据（无 dates）= 宿主当天 */
+    c._dates = (Array.isArray(c.dates) && c.dates.length) ? c.dates.slice().sort() : [home];
     /* 统一图片草稿：历史 imgs/img 归入 _imgSaveArr，编辑器内可增删，保存时整体写回 imgs */
     c._imgSaveArr = (c.imgs && c.imgs.length) ? c.imgs.filter(Boolean).slice() : (c.img ? [c.img] : []);
-    return c;
+    items.push(c);
+  };
+  const bk = hw[dateISO];
+  ((bk && Array.isArray(bk.items)) ? bk.items : []).forEach(it => push(it, dateISO));   // 宿主=当前日期的条目
+  Object.keys(hw).sort().forEach(d => {   // 宿主在别处、但可见日期覆盖当前日期的条目（跨天布置的）
+    if(d === dateISO) return;
+    const b = hw[d];
+    ((b && Array.isArray(b.items)) ? b.items : []).forEach(it => {
+      if(Array.isArray(it && it.dates) && it.dates.indexOf(dateISO) >= 0) push(it, d);
+    });
   });
-  hwEdit = { date: dateISO, items, oldIds: items.map(x => x.id).filter(Boolean) };   // oldIds：本次编辑会话开始时已保存的条目 id（保存时对比得出「被删除的条目」→ 写入墓碑）
+  hwEdit = { date: dateISO, items, oldIds: items.map(x => x.id).filter(Boolean), homeMap };
 }
 function hwEditDirtyDate(){
   const inp = document.getElementById('hwDate');
   return (inp && inp.value) ? inp.value : (new Date().toISOString().slice(0,10));
+}
+/* r260：每条作业卡片各自的「📅 可见」日期 chips（今天起 7 天 ∪ 该条目已选日期；可多选，至少保留一个） */
+function hwVisChipsHtml(it){
+  const sel = (Array.isArray(it._dates) && it._dates.length ? it._dates.slice() : [hwEdit.date]).sort();
+  const t = new Date(); const tIso = fmtISO(t);
+  const set = new Set(sel);
+  for(let i = 0; i < 7; i++){ const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() + i); set.add(fmtISO(d)); }
+  return Array.from(set).sort().map(iso => {
+    let label;
+    if(iso === tIso) label = '今天';
+    else {
+      const diff = Math.round((new Date(iso.replace(/-/g,'/') + ' 12:00:00') - new Date(tIso.replace(/-/g,'/') + ' 12:00:00')) / 86400000);
+      label = diff === 1 ? '明天' : diff === 2 ? '后天' : (Number(iso.slice(5,7)) + '月' + Number(iso.slice(8,10)) + '日');
+    }
+    return `<button type="button" class="hw-range-btn${sel.indexOf(iso) >= 0 ? ' on' : ''}" data-visd="${iso}" data-vcard="${esc(it.id || '')}">${label}</button>`;
+  }).join('');
+}
+function bindHwVisChips(box){
+  box.querySelectorAll('.hw-vis-row .hw-range-btn').forEach(ch => {
+    ch.onclick = () => {
+      if(!hwEdit) return;
+      const it = hwEdit.items.find(x => x.id === ch.dataset.vcard);
+      if(!it) return;
+      const d = ch.dataset.visd;
+      if(!d) return;
+      const arr = (Array.isArray(it._dates) && it._dates.length ? it._dates.slice() : [hwEdit.date]);
+      const ix = arr.indexOf(d);
+      if(ix >= 0){
+        if(arr.length <= 1){ try{ showToast('至少保留一个显示日期'); }catch(e){} return; }
+        arr.splice(ix, 1);
+      } else arr.push(d);
+      it._dates = Array.from(new Set(arr)).sort();
+      renderHwEditor();
+    };
+  });
 }
 function renderHwEditor(){
   const box = document.getElementById('hwEditBox');
@@ -14612,6 +14628,10 @@ function renderHwEditor(){
       <div class="hw-ed-row">
         <select data-f="sub">${HW_SUBJECTS.map(s=>`<option ${s===it.sub?'selected':''}>${s}</option>`).join('')}</select>
         <input type="text" data-f="title" placeholder="作业名称；粘贴「1.听写，2.阅读」可自动拆成多条" value="${esc(it.title||'')}">
+      </div>
+      <div class="hw-ed-row hw-vis-row">
+        <span class="hw-vis-lab" title="选择这份作业在哪些天显示">📅 可见</span>
+        ${hwVisChipsHtml(it)}
       </div>
       <div class="hw-ed-row">
         <input type="text" data-f="dict" style="flex:1;min-width:160px;" placeholder="听写词表（逗号/空格分隔，可留空）" value="${esc((it.dict&&it.dict.words||[]).join('、'))}">
@@ -14631,7 +14651,8 @@ function renderHwEditor(){
       </div>
     </div>`;
   }).join('');
-  box.innerHTML = (hwEdit.items.length ? rows : '<div class="day-empty">这一天还没有作业，点下面「➕ 添加一项」开始布置～</div>') + `
+  box.innerHTML = `<div style="font-size:11px;color:var(--ink-soft,#999);margin-bottom:8px;">💡 每条作业卡片的「📅 可见」可多选日期：选了哪些天，孩子端那些天都会显示这份作业（首页固定只显示当天的）。</div>` +
+    (hwEdit.items.length ? rows : '<div class="day-empty">这一天还没有作业，点下面「➕ 添加一项」开始布置～</div>') + `
     <div class="hw-ed-btns" style="margin-top:10px;">
       <button class="parent-entry" id="hwAdd">➕ 添加一项</button>
       <button class="parent-entry" id="hwUploadAI" style="background:var(--accent-d);">📷 上传图片解析</button>
@@ -14647,7 +14668,8 @@ function renderHwEditor(){
     const trySplit = txt => {
       const segs = hwSplitTitleLines(txt);
       if(!segs || segs.length < 2) return false;
-      hwEdit.items.splice(i, 1, ...segs.map((t, k) => ({ id: k === 0 ? (it.id || ('hw' + Date.now() + Math.floor(Math.random()*100))) : ('hw' + Date.now() + k + Math.floor(Math.random()*100)), sub: it.sub, title: t, detail: '', dict: null })));
+      const _spDates = (it._dates && it._dates.length) ? it._dates.slice() : [hwEdit.date];
+      hwEdit.items.splice(i, 1, ...segs.map((t, k) => ({ id: k === 0 ? (it.id || ('hw' + Date.now() + Math.floor(Math.random()*100))) : ('hw' + Date.now() + k + Math.floor(Math.random()*100)), sub: it.sub, title: t, detail: '', dict: null, _dates: _spDates.slice() })));
       renderHwEditor();
       try { showToast('✅ 已拆成 ' + segs.length + ' 条任务'); } catch(err){}
       return true;
@@ -14695,7 +14717,7 @@ function renderHwEditor(){
     };
   });
   const add = document.getElementById('hwAdd');
-  if(add) add.onclick = ()=>{ hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub:'语文', title:'', detail:'', dict:null }); renderHwEditor(); };
+  if(add) add.onclick = ()=>{ hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub:'语文', title:'', detail:'', dict:null, _dates: [hwEdit.date] }); renderHwEditor(); };
   /* 全局「📷 上传图片解析」：不用先添加空卡，选图/拍照 → 新建任务卡 → AI 自动解析（确认后填入） */
   const upBtn = document.getElementById('hwUploadAI');
   if(upBtn) upBtn.onclick = ()=>{
@@ -14703,7 +14725,7 @@ function renderHwEditor(){
     fi.type = 'file'; fi.accept = 'image/*'; fi.style.display = 'none';
     fi.onchange = ()=>{
       if(fi.files && fi.files[0]){
-        hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub:'其他', title:'', detail:'', dict:null });
+        hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub:'其他', title:'', detail:'', dict:null, _dates: [hwEdit.date] });
         renderHwEditor();
         hwEditorPhoto(hwEdit.items.length - 1, fi.files[0], null);
       }
@@ -14714,6 +14736,7 @@ function renderHwEditor(){
   };
   const save = document.getElementById('hwSave');
   if(save) save.onclick = ()=> hwEditorSave(save);
+  bindHwVisChips(box);
 }
 async function hwEditorAi(i, btn){
   const it = hwEdit && hwEdit.items[i];
@@ -14745,11 +14768,36 @@ async function hwEditorSave(saveBtn){
     else { delete it.imgs; }   // 图片被全部删除 → 清空存档
   });
   hwEdit.items = hwEdit.items.filter(it => (it.title||'').trim() || (it.imgs && it.imgs.length) || it.img);   // 纯图片条目（无标题）也保留
-  // 删除墓碑：本次编辑会话中「原来有、现在没有」的条目 id 记入桶的 dl，防止其他端旧整包回写时复活（同步按墓碑过滤）
-  const prevBucket = hw[hwEdit.date] || {};
-  const dels = Array.from(new Set([].concat(prevBucket.dl || [], hwEdit.oldIds || [])
-    .filter(id => id && !hwEdit.items.some(x => x.id === id)))).slice(0, 60);
-  hw[hwEdit.date] = { items: hwEdit.items.map(it => { const c = Object.assign({}, it, { id: it.id || ('hw' + Date.now() + Math.floor(Math.random()*100)) }); delete c._img; delete c._imgSave; delete c._imgSaveArr; return c; }), ts: Date.now(), dl: dels };
+  /* r260：每条作业各自的可见日期 + 按宿主桶写回。
+     条目永远存放在创建日（宿主桶），dates 只控制「在哪些天可见」→ 改可见日期不搬桶、不产生跨桶墓碑。
+     宿主在别的日期的条目（跨天显示被编辑）写回它自己的宿主桶；被删除的条目在各自宿主桶写墓碑。 */
+  const homeOf = id => (hwEdit.homeMap && hwEdit.homeMap[id]) || hwEdit.date;
+  const savedIds = [];
+  const byHome = {};
+  hwEdit.items.forEach(it => {
+    const home = it._home || hwEdit.date;
+    const c = Object.assign({}, it, { id: it.id || ('hw' + Date.now() + Math.floor(Math.random()*100)) });
+    delete c._img; delete c._imgSave; delete c._imgSaveArr; delete c._home;
+    c.dates = (Array.isArray(it._dates) && it._dates.length ? it._dates.slice() : [home]).sort();   // 逐条可见日期；缺失兜底=宿主当天
+    delete c._dates;
+    savedIds.push(c.id);
+    (byHome[home] = byHome[home] || []).push(c);
+  });
+  const homes = new Set([hwEdit.date]);
+  hwEdit.items.forEach(it => { if(it._home) homes.add(it._home); });
+  (hwEdit.oldIds || []).forEach(id => { if(id) homes.add(homeOf(id)); });   // 被删条目的宿主桶也要写墓碑
+  homes.forEach(d => {
+    const prev = hw[d] || {};
+    const saved = byHome[d] || [];
+    const savedHere = {};
+    saved.forEach(x => { savedHere[x.id] = 1; });
+    const dels = Array.from(new Set([].concat(prev.dl || [], (hwEdit.oldIds || [])
+      .filter(id => id && savedIds.indexOf(id) < 0 && homeOf(id) === d)   // 本次会话删除的、宿主在本桶的条目
+    ).filter(id => id && !savedHere[id]))).slice(0, 60);   // 重新写回的 id 从墓碑移除（允许同桶复活）
+    const delSet = {}; dels.forEach(id => { delSet[id] = 1; });
+    const keep = (prev.items || []).filter(x => x && x.id && !savedHere[x.id] && !delSet[x.id]);   // 旧副本被新版本替换；会话中删除的剔除
+    hw[d] = { items: keep.concat(saved), ts: Date.now(), dl: dels };
+  });
   saveHW();
   hwEditLoad(hwEdit.date);
   renderHwEditor();
@@ -14773,7 +14821,7 @@ function bindHwEditor(){
         if(!files || !files.length || !/^image\//.test(files[0].type)) return;
         e.preventDefault();
         if(!hwEdit) hwEditLoad(new Date().toISOString().slice(0,10));
-        hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub: '其他', title: '', detail: '', dict: null });
+        hwEdit.items.push({ id: 'hw' + Date.now() + Math.floor(Math.random()*100), sub: '其他', title: '', detail: '', dict: null, _dates: [hwEdit.date] });
         renderHwEditor();
         hwEditorPhoto(hwEdit.items.length - 1, files[0], null);
       } catch(err){}
