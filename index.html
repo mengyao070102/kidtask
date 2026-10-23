@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609258" />
+<meta name="build-version" content="202609259" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -1519,6 +1519,18 @@
   .hw-grp { background:var(--card-bg, rgba(255,255,255,.6)); border:2px solid var(--accent-soft); border-radius:16px; padding:10px 12px; margin-bottom:10px; }
   .hw-grp-h { font-weight:800; font-size:13.5px; color:var(--title); margin-bottom:4px; display:flex; align-items:center; gap:6px; }
   .hw-grp-cnt { font-size:11px; font-weight:800; background:var(--accent-soft); color:var(--title); border-radius:999px; padding:1px 8px; }
+  /* r259：校内作业显示周期切换 + 多日分组标题 */
+  .hw-range-sw { display:inline-flex; gap:4px; }
+  .hw-range-btn {
+    appearance:none; -webkit-appearance:none; border:2px solid var(--accent-soft); background:#fff; border-radius:999px;
+    padding:3px 11px; font:inherit; font-size:12px; font-weight:800; color:#8a6a7a; cursor:pointer; white-space:nowrap;
+  }
+  .hw-range-btn.on { background:var(--accent-d); border-color:var(--accent-d); color:#fff; }
+  .hw-day-h {
+    display:flex; align-items:center; gap:6px; font-size:14px; font-weight:900; color:var(--title, #7a4a5e);
+    margin:12px 0 6px; padding-left:2px;
+  }
+  .hw-day-h .hw-day-ico { font-size:16px; }
   .hw-row { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:10px; cursor:pointer; transition:background .15s; }
   .hw-row:active { background:var(--accent-soft); }
   .hw-row-title { flex:1; font-size:13.5px; font-weight:700; color:var(--ink); word-break:break-all; }
@@ -14460,25 +14472,72 @@ function hwHomeRow(iso, it, seq){
   </div>`;
 }
 /* 首页：📚 今日校内作业（插在 📌 今日任务 之前）—— 科目分组 + 可点击完成任务列表 */
+/* r259：校内作业显示时间周期（1=今天 / 3=近3天 / 7=本周7天；本机显示偏好，localStorage） */
+function hwShowDaysGet(){
+  let n = 1;
+  try{ n = Number(localStorage.getItem('kidtask_hw_show_days')) || 1; }catch(e){}
+  return [1,3,7].indexOf(n) >= 0 ? n : 1;
+}
+function hwShowDaysSet(n){
+  try{ localStorage.setItem('kidtask_hw_show_days', String(n)); }catch(e){}
+}
+function hwDayLabel(d, i){
+  if(i === 0) return '今天';
+  if(i === 1) return '明天';
+  const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
+  return (d.getMonth()+1) + '月' + d.getDate() + '日 · ' + wd;
+}
 function prependHwHome(tl, todayIso){
-  const items = hwItems(todayIso);
+  const days = hwShowDaysGet();
   const hint = document.createElement('div');
   hint.className = 'section-h';
-  hint.textContent = '📚 今日校内作业' + (items.length ? `（${items.length} 项）` : '');
-  hint.style.marginTop = '18px';
+  hint.style.cssText = 'margin-top:18px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;';
+  const titleSpan = document.createElement('span');
+  hint.appendChild(titleSpan);
+  const sw = document.createElement('span');
+  sw.className = 'hw-range-sw';
+  sw.innerHTML = [1,3,7].map(n => `<button class="hw-range-btn${n===days?' on':''}" data-n="${n}" type="button">${n===1?'今天':n===3?'近3天':'近7天'}</button>`).join('');
+  hint.appendChild(sw);
   tl.appendChild(hint);
-  if(!items.length){
-    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty small hw-empty', innerHTML:'<span class="big">🎒</span>今天暂无校内作业，家长可在「家长审核 → 📚 校内作业」布置～'}));
-    return;
+  /* 收集时间范围内的各天作业（只显示有内容的日子） */
+  const buckets = [];
+  for(let i = 0; i < days; i++){
+    const d = new Date(todayIso.replace(/-/g, '/') + ' 12:00:00'); d.setDate(d.getDate() + i);
+    const iso = fmtISO(d);
+    const items = hwItems(iso);
+    if(items.length) buckets.push({ iso, d, items, i });
   }
-  const box = document.createElement('div');
-  box.innerHTML = hwSubjectGroups(items).map(g => `
-    <div class="hw-grp">
-      <div class="hw-grp-h">${hwSubEmoji(g.sub)} ${esc(g.sub)}<span class="hw-grp-cnt">${g.items.length}</span></div>
-      ${g.items.map((it, k) => hwHomeRow(todayIso, it, k + 1)).join('')}
-    </div>`).join('');
-  while(box.firstChild) tl.appendChild(box.firstChild);
-  bindHwDictBtns(tl);
+  const total = buckets.reduce((s, b) => s + b.items.length, 0);
+  titleSpan.textContent = (days === 1 ? '📚 今日校内作业' : `📚 校内作业（${days===3?'近3天':'本周'}）`) + (total ? `（${total} 项）` : '');
+  if(!total){
+    tl.appendChild(Object.assign(document.createElement('div'),{className:'empty small hw-empty', innerHTML:'<span class="big">🎒</span>' + (days===1?'今天暂无校内作业':'时间范围内暂无校内作业') + '，家长可在「家长审核 → 📚 校内作业」布置～'}));
+  } else {
+    buckets.forEach(b => {
+      if(days > 1){
+        const dh = document.createElement('div');
+        dh.className = 'hw-day-h';
+        dh.innerHTML = `<span class="hw-day-ico">${b.i===0?'📍':b.i===1?'🌅':'📅'}</span>${esc(hwDayLabel(b.d, b.i))}<span class="hw-grp-cnt">${b.items.length} 项</span>`;
+        tl.appendChild(dh);
+      }
+      const box = document.createElement('div');
+      box.innerHTML = hwSubjectGroups(b.items).map(g => `
+        <div class="hw-grp">
+          <div class="hw-grp-h">${hwSubEmoji(g.sub)} ${esc(g.sub)}<span class="hw-grp-cnt">${g.items.length}</span></div>
+          ${g.items.map((it, k) => hwHomeRow(b.iso, it, k + 1)).join('')}
+        </div>`).join('');
+      while(box.firstChild) tl.appendChild(box.firstChild);
+    });
+    bindHwDictBtns(tl);
+  }
+  /* 切换显示周期（本机偏好，立即重渲） */
+  sw.querySelectorAll('.hw-range-btn').forEach(btn => {
+    btn.onclick = () => {
+      const n = Number(btn.dataset.n) || 1;
+      if(n === hwShowDaysGet()) return;
+      hwShowDaysSet(n);
+      render();
+    };
+  });
 }
 /* 校内页：对应日期展示（插在当天任务面板之后） */
 function appendHwSchoolDay(selISO){
