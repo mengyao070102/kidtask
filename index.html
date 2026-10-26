@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609263" />
+<meta name="build-version" content="202609264" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -12240,9 +12240,10 @@ function cloudDbStateText(){
   if(m.size) parts.push(Math.max(1, Math.round(m.size / 1024)) + 'KB');
   return parts.join('；');
 }
-/* r263：☁️ 星星对账（HTTPS 兜底）——MQTT 下行不畅的设备（如部分 iOS）收不到别的端摇骰子的星星扣减，
-   启动后及每 30 分钟静默 GET 云端备份，把 diceUsed（取大）和 starLog（按 id 并集）单调合并进本地。
-   只做「只增不减」的合并，绝不覆盖本地任何其他数据；星星总数会自动收敛到各端一致。 */
+/* r263/r264：☁️ 星星对账（HTTPS 兜底）——MQTT 下行不畅的设备（如部分 iOS）收不到别的端的实时快照，
+   启动后及每 30 分钟静默 GET 云端备份，把 diceUsed（取大）、starLog（按 id 并集）、
+   年级/学期/PIN（按 gts/sts/pts 取大）单调合并进本地。
+   只做「只增不减/取大」的合并，绝不覆盖本地任何其他数据；星星与年级会自动收敛到各端一致。 */
 const CLOUD_STAR_RECON_KEY = 'kidtask_star_recon_at';
 let _starReconBusy = false;
 async function maybeCloudStarReconcile(manual){
@@ -12281,9 +12282,35 @@ async function maybeCloudStarReconcile(manual){
             try{ render(); }catch(e){}
           }
         }
+        /* r264：元数据对账（年级/学期/PIN）——与 applySyncState 同口径按 ts 取大采纳。
+           覆盖「改了年级但其他端收不到 MQTT 下行」的场景：云端备份里 gts 更大就补采纳。 */
+        let _metaChanged = false;
+        try{
+          const cg = D['kidtask_grade_v1'], cgTs = Number(D['kidtask_gts']) || 0;
+          if(cg != null && cgTs > gradeTs){ const _old = grade; grade = String(cg); gradeTs = cgTs;
+            try{ localStorage.setItem(GKEY, grade); localStorage.setItem('kidtask_gts', String(gradeTs)); }catch(e){}
+            if(_old !== grade){ onGradeChanged(); _metaChanged = true; }
+          }
+        }catch(e){}
+        try{
+          const cs = D['kidtask_semester_v1'], csTs = Number(D['kidtask_sts']) || 0;
+          if(cs != null && csTs > semTs){ semester = String(cs); semTs = csTs;
+            try{ localStorage.setItem(SKEY, semester); localStorage.setItem('kidtask_sts', String(semTs)); }catch(e){}
+          }
+        }catch(e){}
+        try{
+          const cp = D['kidtask_parentpin_v1'], cpTs = Number(D['kidtask_pts']) || 0;
+          if(cp != null && cpTs > pinTs && cpTs > 1){ try{ setPin(String(cp)); }catch(e){} pinTs = cpTs;
+            try{ localStorage.setItem('kidtask_pts', String(pinTs)); }catch(e){}
+          }
+        }catch(e){}
+        if(_metaChanged){
+          try{ if(page === 'home' || page === 'study' || page === 'parent'){ render(); } }catch(e){}
+        }
         try { const m = cloudDbMeta(); m.reconAt = Date.now(); cloudDbMetaSave(m); } catch(e){}
-        if(manual || diceFrom >= 0 || addedLog){
-          showToast('☁️ 星星对账完成' + (diceFrom >= 0 ? '：已摇次数对齐到 ' + diceFrom : '') + (addedLog ? (diceFrom >= 0 ? '，' : '：') + '补齐 ' + addedLog + ' 条星星记录' : '') + (diceFrom < 0 && !addedLog && manual ? '（本地已是最新）' : ''));
+        if(manual || diceFrom >= 0 || addedLog || _metaChanged){
+          const _metaTxt = _metaChanged ? ((diceFrom >= 0 || addedLog) ? '，' : '：') + '年级已对齐到 ' + gradeName(grade) : '';
+          showToast('☁️ 星星对账完成' + (diceFrom >= 0 ? '：已摇次数对齐到 ' + diceFrom : '') + (addedLog ? (diceFrom >= 0 ? '，' : '：') + '补齐 ' + addedLog + ' 条星星记录' : '') + _metaTxt + (diceFrom < 0 && !addedLog && !_metaChanged && manual ? '（本地已是最新）' : ''));
         }
       } else if(manual){ showToast('☁️ 对账失败（状态 ' + r.status + '）' + (r.status === 404 ? '：云端还没有备份' : '')); }
     }catch(e){ if(manual) showToast('☁️ 对账失败：' + (e && e.message ? e.message : e)); }
@@ -15682,6 +15709,17 @@ function touchMeta(which){
   else if(which==='p'){ pinTs = Math.max(pinTs+1, logicalTs+1); try{ localStorage.setItem('kidtask_pts', String(pinTs)); }catch(e){} }
   logicalTs = Math.max(logicalTs, gradeTs, semTs, pinTs);
   try { localStorage.setItem('kidtask_sync_ts', String(logicalTs)); } catch(e){}
+  /* r264：元数据（年级/学期/PIN）改动后尽快落一份云端备份——MQTT 上行不畅时，其他端可靠 HTTPS 对账拿到最新值 */
+  try { if(typeof bumpCloudBackupSoon === 'function') bumpCloudBackupSoon(); } catch(e){}
+}
+/* r264：元数据改动后延迟 5 秒强制上传一次云端备份（独立防抖，不受 30 分钟节流限制；上传内部仍有 sha 冲突自愈） */
+let _metaBackupTimer = null;
+function bumpCloudBackupSoon(){
+  try{
+    if(!MEDIA_TOKEN || !familyCode) return;
+    if(_metaBackupTimer) clearTimeout(_metaBackupTimer);
+    _metaBackupTimer = setTimeout(()=>{ _metaBackupTimer = null; try{ cloudDbUpload(false); }catch(e){} }, 5000);
+  }catch(e){}
 }
 function evtTopic(){ return 'kidtask/' + familyCode + '/evt'; }
 /* 读取本机构建版本号（单一版本源：<head> meta[name=build-version]），供「同步诊断」面板显示 */
