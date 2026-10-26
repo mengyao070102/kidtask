@@ -7,7 +7,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" data-page-node-id="uHF5SEmqncTsrasuRBNH6A" />
 <meta http-equiv="Pragma" content="no-cache" data-page-node-id="y9iI3hRbjW9WJ4THg144WC" />
 <meta http-equiv="Expires" content="0" data-page-node-id="IC4Gy6SocdvYMXF1IFyZsz" />
-<meta name="build-version" content="202609262" />
+<meta name="build-version" content="202609263" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#ff8fab" />
 <script>
@@ -12232,12 +12232,63 @@ function maybeCloudAutoBackup(){   // ack 后静默自动备份：30 分钟节�
 }
 function cloudDbStateText(){
   const m = cloudDbMeta();
-  if(!m.upAt && !m.downAt) return MEDIA_TOKEN ? '尚未备份' : '尚未备份（未配置 token）';
+  if(!m.upAt && !m.downAt && !m.reconAt) return MEDIA_TOKEN ? '尚未备份' : '尚未备份（未配置 token）';
   const parts = [];
   if(m.upAt) parts.push('上次备份 ' + relTime(m.upAt) + (m.upN ? '，共 ' + m.upN + ' 次' : ''));
   if(m.downAt) parts.push('上次恢复 ' + relTime(m.downAt));
+  if(m.reconAt) parts.push('上次对账 ' + relTime(m.reconAt));
   if(m.size) parts.push(Math.max(1, Math.round(m.size / 1024)) + 'KB');
   return parts.join('；');
+}
+/* r263：☁️ 星星对账（HTTPS 兜底）——MQTT 下行不畅的设备（如部分 iOS）收不到别的端摇骰子的星星扣减，
+   启动后及每 30 分钟静默 GET 云端备份，把 diceUsed（取大）和 starLog（按 id 并集）单调合并进本地。
+   只做「只增不减」的合并，绝不覆盖本地任何其他数据；星星总数会自动收敛到各端一致。 */
+const CLOUD_STAR_RECON_KEY = 'kidtask_star_recon_at';
+let _starReconBusy = false;
+async function maybeCloudStarReconcile(manual){
+  try{
+    if(_starReconBusy || _cloudBusy || !MEDIA_TOKEN || !familyCode){ if(manual) showToast('☁️ 需先配置「照片云存储」token 且连上家庭码'); return; }
+    if(!manual){
+      const last = Number(localStorage.getItem(CLOUD_STAR_RECON_KEY)) || 0;
+      if(Date.now() - last < 30 * 60 * 1000) return;
+    }
+    _starReconBusy = true;
+    let addedLog = 0, diceFrom = -1;
+    try{
+      const r = await ghDbFetch('GET', cloudDbPath(), null, 'application/vnd.github.raw');
+      if(r.status === 200){
+        const txt = await r.text();
+        const payload = cloudDbDecode(txt);
+        const D = (payload && payload.data) || {};
+        try { localStorage.setItem(CLOUD_STAR_RECON_KEY, String(Date.now())); } catch(e){}
+        /* diceUsed 取大（与 MQTT 同步同口径：谁大听谁的） */
+        let diceCloud = null; try{ diceCloud = JSON.parse(D['kidtask_dice_v1'] || 'null'); }catch(e){}
+        if(diceCloud && typeof diceCloud.used === 'number' && diceCloud.used > (dice.used || 0)){
+          diceFrom = diceCloud.used;
+          dice.used = diceCloud.used;
+          try{ saveDice(); }catch(e){}
+          if(page === 'games' && activeGame === 'dice'){ try{ renderDice(); }catch(e){} }
+        }
+        /* starLog 按 id 并集合并（与 applySyncState 同口径），去重不丢记录 */
+        let slCloud = null; try{ slCloud = JSON.parse(D['kidtask_star_log_v1'] || 'null'); }catch(e){}
+        if(Array.isArray(slCloud) && slCloud.length){
+          const seen = new Set(starLog.map(e => String(e && (e.id || e.ts))));
+          slCloud.forEach(e => { if(e && (e.id || e.ts) && !seen.has(String(e.id || e.ts))){ starLog.push(e); seen.add(String(e.id || e.ts)); addedLog++; } });
+          if(addedLog){
+            starLog.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+            if(starLog.length > 1000) starLog.length = 1000;
+            saveStarLog();
+            try{ render(); }catch(e){}
+          }
+        }
+        try { const m = cloudDbMeta(); m.reconAt = Date.now(); cloudDbMetaSave(m); } catch(e){}
+        if(manual || diceFrom >= 0 || addedLog){
+          showToast('☁️ 星星对账完成' + (diceFrom >= 0 ? '：已摇次数对齐到 ' + diceFrom : '') + (addedLog ? (diceFrom >= 0 ? '，' : '：') + '补齐 ' + addedLog + ' 条星星记录' : '') + (diceFrom < 0 && !addedLog && manual ? '（本地已是最新）' : ''));
+        }
+      } else if(manual){ showToast('☁️ 对账失败（状态 ' + r.status + '）' + (r.status === 404 ? '：云端还没有备份' : '')); }
+    }catch(e){ if(manual) showToast('☁️ 对账失败：' + (e && e.message ? e.message : e)); }
+    finally{ _starReconBusy = false; }
+  }catch(e){ _starReconBusy = false; }
 }
 /* ===== 云端落库结束 ===== */
 /* 通用「确认」弹窗（替代原生 confirm，体验更统一、移动端/WebView 不拦） */
@@ -14157,6 +14208,7 @@ function renderParent(){
         <div class="backup-row" style="margin-top:6px;">
           <button class="parent-entry" id="cloudUpBtn">⬆️ 备份到云端</button>
           <button class="parent-entry" id="cloudDownBtn">⬇️ 从云端恢复</button>
+          <button class="parent-entry" id="cloudStarBtn" style="background:#8a7fa8;">⭐ 星星对账</button>
         </div>
         <p class="danger-note" style="color:#5a7fb0;opacity:.85;">☁️ <b>云端落库</b>：整份数据加密后存到 GitHub 仓库 kidtask-media 的 <code>db/</code> 目录（与照片共用同一把 token）。MQTT 实时同步不稳时，这是一条可靠的兜底通道：任一台设备点「⬆️ 备份到云端」，其他设备点「⬇️ 从云端恢复」即可拉齐全部数据（含照片）。连接正常时每 30 分钟自动备份一次（数据有变化才上传）。当前状态：<b id="cloudState"></b></p>
         <p class="danger-note" style="color:#5a7fb0;opacity:.85;">💡 同步会与其他端<b>双向合并</b>最新数据；导入则是整份<b>覆盖</b>本机。两者都不影响其他设备。节假日数据用于月视图标注，点「🌐 联网更新节假日」会联网拉取<b>当前查看年份</b>的最新法定安排并缓存到本机（离线时自动回退到内置数据）。App 启动时也会静默联网刷新「今年」的数据。</p>
@@ -14252,6 +14304,8 @@ function renderParent(){
   if(cloudState) cloudState.textContent = cloudDbStateText();
   if(cloudUpBtn) cloudUpBtn.onclick = ()=> cloudDbUpload(true);
   if(cloudDownBtn) cloudDownBtn.onclick = ()=> cloudDbDownload();
+  const cloudStarBtn = main.querySelector('#cloudStarBtn');
+  if(cloudStarBtn) cloudStarBtn.onclick = ()=> maybeCloudStarReconcile(true);
   /* ☁️ 照片云存储 token 配置（只存本机 localStorage，不进公开代码） */
   const mtInput = main.querySelector('#mediaTokenInput');
   const mtState = main.querySelector('#mediaTokenState');
@@ -16482,6 +16536,8 @@ try { (function restoreFromSnapshot(){
 })(); } catch(e){}
 try { document.addEventListener('pagehide', saveLocalSnapshot); } catch(e){}
 connectSync();
+/* r263：☁️ 星星对账（HTTPS 兜底）——启动后 25 秒首跑，之后每 30 分钟；MQTT 下行不畅的设备靠它收敛星星 */
+try { setTimeout(()=>{ maybeCloudStarReconcile(false); }, 25000); setInterval(()=>{ maybeCloudStarReconcile(false); }, 30 * 60 * 1000); } catch(e){}
 try { if(!tasks.length && familyCode){ render(); } } catch(e){}   /* 空数据场景：familyCode 就绪后重绘一次，让「正在从家庭恢复」横幅立即可见（首渲染时 familyCode 还是空串） */
 /* 节假日：启动后静默联网刷新「今年」数据（仅当当前正在查看今年时才重渲染，避免打断） */
 (async()=>{ try { const y = new Date().getFullYear(); const m = await fetchHolidays(y); if(m && typeof calYear==='number' && calYear===y) render(); } catch(e){} })();
